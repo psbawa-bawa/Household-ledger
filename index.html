@@ -175,6 +175,15 @@ tr.grp td{background:var(--sunk);font-weight:600;font-size:12px;text-transform:u
 .btn.mic.on{background:var(--bad);color:#fff;border-color:var(--bad)}
 @media (prefers-reduced-motion:no-preference){.btn.mic.on{animation:pulse 1.2s infinite}@keyframes pulse{50%{opacity:.7}}}
 main{padding-bottom:96px}
+.modal.wide{width:min(1060px,100%)}
+.impsec{border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.impsec summary{cursor:pointer;padding:2px 0}
+.impsec[open]{gap:8px}
+.impsec[open]>*+*{margin-top:8px}
+table.imp td{vertical-align:top}
+table.imp tr.off td{opacity:.55}
+table.imp tr.off td:first-child{opacity:1}
+table.imp input,table.imp select{font-size:13px}
 /* colour pass */
 header.top{background:var(--hdr)}
 .g-stats .stat{border-color:transparent}
@@ -1137,7 +1146,7 @@ VIEWS.budget = () => {
   const oo = [...B.oneoffs].sort((a,b)=>(a.date||"")<(b.date||"")?-1:1);
   return `<section class="block">
     <div class="sechead"><div><h2>Monthly budget</h2><p class="sub">Money in, less regular bills and mortgages, gives what you have to spend. One-offs come out of that.</p></div>
-      <div class="toolbar">${addBtn("budget","Add income or bill")}</div></div>
+      <div class="toolbar">${canWrite?`<button class="btn" data-act="import-open">Import bank statement</button>`:""}${addBtn("budget","Add income or bill")}</div></div>
     <div class="toolbar"><button class="btn small" data-act="byear" data-d="-1" aria-label="Previous year">← ${+yr-1}</button><b class="num">${yr}</b><button class="btn small" data-act="byear" data-d="1" aria-label="Next year">${+yr+1} →</button><span class="sub">Each month shows what was left at the end.</span></div>
     <div class="mstrip">${strip}</div>
   </section>
@@ -1574,6 +1583,11 @@ document.addEventListener("click", async (e) => {
   if (act === "backup") return backup();
   if (act === "ics") return exportICS();
   if (act === "quick-open") return quickOpen();
+  if (act === "esave") return quickExpenseSave();
+  if (act === "import-open") return importOpen();
+  if (act === "impsave") return importSave();
+  if (act === "impflip") { if (IMP) importLoad(IMP.file, !IMP.cardStyle); return; }
+  if (act === "impall") { if (IMP) { const on = b.dataset.on === "1"; IMP.rows.forEach(r => { if (r.section === b.dataset.sec) r.include = on; }); importRender(); } return; }
   if (act === "qmic") return quickListen();
   if (act === "qsave") return quickSave();
   if (act === "repbasis") { repBasis = b.dataset.m; return render(); }
@@ -1694,7 +1708,7 @@ const QMONTHS = ["january","february","march","april","may","june","july","augus
 const QMRE = "(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
 const qMonthIdx = w => QMONTHS.findIndex(m => m.startsWith(w.slice(0,3)));
 function qNormalise(text) {
-  let s = " " + String(text).toLowerCase().replace(/[’']/g,"").replace(/[,.!?]/g," ") + " ";
+  let s = " " + String(text).toLowerCase().replace(/[’']/g,"").replace(/(\d),(\d{3})\b/g,"$1$2").replace(/\.(?!\d)|(?<!\d)\./g," ").replace(/[,!?]/g," ") + " ";
   for (const [w,n] of Object.entries(QWORDS).sort((a,b)=>b[0].length-a[0].length)) s = s.replace(new RegExp(`\\b${w}\\b`,"g"), String(n));
   return s.replace(/\s+/g," ");
 }
@@ -1739,6 +1753,8 @@ function parseQuick(text) {
   if (!m && !nameHit.length && !propHit.length) pool = [];
   if (!m && !nameHit.length && propHit.length) pool = pool.filter(t => true);
   res.tenants = pool;
+  res.rentish = !!m || nameHit.length > 0 || (/\brent\b/.test(s) && !/ground rent/.test(s));
+  res.expenseish = EXP_WORDS.test(s);
   return res;
 }
 let qState = null, qRec = null;
@@ -1747,11 +1763,11 @@ function quickOpen() {
   qState = null;
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   $("#modalRoot").innerHTML = `<div class="scrim" id="scrim"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="qTitle">
-    <header><h2 id="qTitle">Quick add rent</h2><button class="btn ghost" data-act="close" aria-label="Close">✕</button></header>
+    <header><h2 id="qTitle">Quick add</h2><button class="btn ghost" data-act="close" aria-label="Close">✕</button></header>
     <form id="qForm" style="padding:16px 18px;display:flex;flex-direction:column;gap:12px" novalidate>
-      <p class="sub" style="margin:0">Say or type what came in. For example: <i>“Room 7 paid in cash on the 5th of October”</i>, <i>“Renaissance Court £2150 by bank today”</i> or <i>“Omkar paid September rent”</i>.</p>
+      <p class="sub" style="margin:0">Say or type a rent payment, a bill or a spend. For example: <i>“Room 7 paid in cash on the 5th of October”</i>, <i>“British Gas for the HMO £85 every month on the 1st”</i> or <i>“Boiler repair at the HMO £120 yesterday”</i>.</p>
       <div class="row" style="flex-wrap:nowrap">
-        <input class="input" id="qText" autocomplete="off" placeholder="Room 7 paid rent in cash on 5 October" style="flex:1;min-width:0;padding:10px;font-size:15px">
+        <input class="input" id="qText" autocomplete="off" placeholder="Room 7 paid in cash on 5 October" style="flex:1;min-width:0;padding:10px;font-size:15px">
         ${SR?`<button type="button" class="btn mic" id="qMic" data-act="qmic" aria-label="Speak">${MIC_SVG}<span>Speak</span></button>`:""}
       </div>
       <div id="qOut"></div>
@@ -1775,8 +1791,9 @@ function quickParse() {
   const text = $("#qText").value.trim(); if (!text) return;
   const r = parseQuick(text); qState = r;
   const out = $("#qOut");
+  if ((r.expenseish && !r.rentish) || (!r.tenants.length && r.amount !== null)) return quickExpenseForm(parseExpense(text));
   if (!r.tenants.length) {
-    out.innerHTML = `<div class="banner bad">I couldn't tell whose rent this is. Mention the room number (“room 7”), the tenant's name or the property name.</div>`;
+    out.innerHTML = `<div class="banner bad">I couldn't work that out. For rent, mention the room number (“room 7”), the tenant's name or the property. For a bill or spend, include the amount (“£85”).</div>`;
     return;
   }
   const t0 = r.tenants[0];
@@ -1827,10 +1844,270 @@ document.addEventListener("change", (e) => {
 document.addEventListener("submit", (e) => { if (e.target.id === "qForm") { e.preventDefault(); quickParse(); } });
 (function addQuickButton() {
   const b = document.createElement("button");
-  b.className = "fab"; b.type = "button"; b.dataset.act = "quick-open"; b.setAttribute("aria-label", "Quick add rent by voice or text");
+  b.className = "fab"; b.type = "button"; b.dataset.act = "quick-open"; b.setAttribute("aria-label", "Quick add rent, bills or spending by voice or text");
   b.innerHTML = `${MIC_SVG}<span>Quick add</span>`;
   document.body.appendChild(b);
 })();
+
+// ---------- expenses: shared helpers ----------
+const GROUP_RULES = [
+  [/american express|\bamex\b|barclaycard|credit card|capital one|\bmbna\b|tesco bank|virgin money cc/, "Credit cards"],
+  [/mortgage/, "Mortgage"],
+  [/council|\bctax\b/, "Home"],
+  [/british gas|octopus|\bedf\b|e\.?on\b|\bovo\b|scottish power|so energy|utility warehouse|electric|\bgas\b|energy/, "Home"],
+  [/water|thames|severn|anglian|yorkshire water|affinity/, "Home"],
+  [/\bsky\b|virgin media|\bbt\b|talktalk|plusnet|vodafone|\bee\b|\bo2\b|three|giffgaff|tv licen|broadband|phone/, "Home"],
+  [/netflix|spotify|disney|prime video|amazon prime|apple\.com|icloud|google|youtube|audible|now tv|chatgpt|claude|subscription/, "Subscriptions"],
+  [/insurance|aviva|admiral|direct line|\blv\b|churchill|axa|hastings|legal & general|legal and general|vitality|bupa|zurich|homecare|boiler cover/, "Insurance"],
+  [/dvla|car tax|road tax|petrol|fuel|\bshell\b|\bbp\b|\besso\b|texaco|\brac\b|\baa\b|green flag|car finance|parking|mot\b/, "Car"],
+  [/gym|puregym|nuffield|david lloyd/, "Subscriptions"],
+  [/school|nursery|tuition|tutor|uni|student/, "Children"],
+  [/vanguard|trading ?212|aj bell|hargreaves|\bisa\b|\bsip\b|zerodha|groww|savings/, "Savings & investments"],
+  [/tesco|sainsbury|asda|aldi|lidl|morrisons|waitrose|co-?op|ocado|m&s|marks & spencer|iceland/, "Groceries"],
+  [/amazon|ebay|argos|ikea|b&q|screwfix|toolstation|wickes/, "Shopping"],
+  [/salary|wages|payroll/, "Salaries"],
+];
+function guessGroup(desc) {
+  const d = " " + String(desc||"").toLowerCase() + " ";
+  for (const p of S.properties) {
+    const words = String(p.name||"").toLowerCase().split(/\s+/).filter(w => w.length >= 3);
+    if (words.some(w => d.includes(" "+w))) return { group: /^Home/.test(p.kind||"") ? "Home" : p.name, propertyId: p.id };
+  }
+  for (const [re, g] of GROUP_RULES) if (re.test(d)) return { group: g, propertyId: "" };
+  return { group: "", propertyId: "" };
+}
+const titleCase = s => String(s||"").toLowerCase().replace(/\b([a-z])/g, c => c.toUpperCase()).replace(/\b(Hmo|Dd|Bt|Ee|O2|Isa|Uk|Tv|Mot|Svr)\b/g, w => w.toUpperCase());
+const merchantKey = desc => String(desc||"").toLowerCase()
+  .replace(/\b(dd|d\/d|direct debit|s\/o|so|standing order|fpo|fpi|bgc|deb|card payment|card|payment|pmt|to|from|ref|reference|contactless|pos|purchase|visa|debit|ltd|limited|plc|uk|gb|london|www|com|co)\b/g, " ")
+  .replace(/[^a-z& ]+/g, " ").replace(/\s+/g, " ").trim().split(" ").slice(0, 3).join(" ");
+
+// ---------- quick add: expenses ----------
+const EXP_WORDS = /\b(bill|bills|expense|expenses|spent|spend|bought|buy|cost|costs|paid for|direct debit|standing order|subscription|every month|monthly|each month|per month|a month|one off|one-off|oneoff|repair|repairs|electric|electricity|gas|water|council|insurance|broadband|service charge|ground rent|salary|wages|income|bonus|refund)\b/;
+function parseExpense(text) {
+  const s = qNormalise(text);
+  const r = parseQuick(text);
+  const e = { kind: "expense", recurring: false, amount: r.amount, date: r.date, day: "", label: "", group: "", propertyId: "" };
+  if (/\b(salary|wages|income|bonus|refund|paid in|received|got paid)\b/.test(s) && !/\b(paid for|spent|bought)\b/.test(s)) e.kind = "income";
+  e.recurring = /\b(every month|each month|per month|a month|monthly|direct debit|standing order|recurring|regular)\b/.test(s) || (e.kind === "income" && /\b(salary|wages)\b/.test(s) && !/\b(bonus|one off|one-off)\b/.test(s));
+  if (/\b(one off|one-off|oneoff|just once|this once)\b/.test(s)) e.recurring = false;
+  let m = s.match(/\bon the (\d{1,2})(?:st|nd|rd|th)?\b/) || s.match(/\b(\d{1,2})(?:st|nd|rd|th)\s+(?:of\s+)?(?:each|every|the)\s+month\b/);
+  if (m && e.recurring) e.day = +m[1];
+  // label: strip amounts, dates and filler
+  let L = " " + s + " ";
+  L = L.replace(/£\s?\d[\d,]*(?:\.\d{1,2})?/g, " ").replace(/\b\d[\d,]*(?:\.\d{1,2})?\s?(?:pounds|quid|gbp)\b/g, " ");
+  L = L.replace(new RegExp(`\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?${QMRE}\\b`, "g"), " ").replace(new RegExp(`\\b${QMRE}\\s+(?:the\\s+)?\\d{1,2}(?:st|nd|rd|th)?\\b`, "g"), " ");
+  L = L.replace(/\b\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?\b/g, " ").replace(/\bon the \d{1,2}(?:st|nd|rd|th)?\b/g, " ").replace(/\b\d{1,2}(?:st|nd|rd|th)\s+(?:of\s+)?(?:each|every|the)\s+month\b/g, " ");
+  L = L.replace(/\b(please|can you|could you|add|added|adding|record|put|an?|the|this|that|it|is|its|for|of|to|on|in|at|by|we|i|ive|i have|have|has|had|our|my|was|were|be|goes|go|going|out|comes|came|paid|pay|pays|spent|spend|cost|costs|bought|expense|expenses|bill|every month|each month|per month|a month|monthly|direct debit|standing order|recurring|regular|one off|one-off|oneoff|today|yesterday|pounds|quid|from|account|bank|cash|card|which|and|as|with|amount|of)\b/g, " ");
+  e.label = titleCase(L.replace(/\s+/g, " ").trim()) || (e.kind === "income" ? "Income" : "Expense");
+  if (e.amount === null) {
+    let t = " " + s + " ";
+    t = t.replace(new RegExp(`\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?${QMRE}\\b`, "g"), " ").replace(/\bon the \d{1,2}(?:st|nd|rd|th)?\b/g, " ").replace(/\b\d{1,2}(?:st|nd|rd|th)\b/g, " ").replace(/\broom\s*\d+\b/g, " ").replace(/\b\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?\b/g, " ");
+    const mm = t.match(/\b(\d+(?:\.\d{1,2})?)\b/); if (mm) e.amount = num(mm[1]);
+  }
+  const g = guessGroup(text); e.group = g.group === "Mortgage" ? "" : g.group; e.propertyId = g.propertyId;
+  if (e.amount !== null) e.label = titleCase(e.label.toLowerCase().replace(new RegExp(`\\b${String(e.amount).replace(".","\\.")}\\b`), " ").replace(/\b\d+(?:\.\d+)?\b/g, " ").replace(/\s+/g," ").trim()) || e.label;
+  if (g.propertyId) { const pw = String((byId("properties", g.propertyId)||{}).name||"").toLowerCase().split(/\s+/).filter(w => w.length >= 3); const cleaned = e.label.toLowerCase().split(" ").filter(w => !pw.includes(w)).join(" ").trim(); if (cleaned) e.label = titleCase(cleaned); }
+  if (e.kind === "income" && !e.group) e.group = "Salaries";
+  return e;
+}
+function quickExpenseForm(e) {
+  qState = { mode: "expense", e };
+  const types = [["bill","Monthly bill (money out)"],["oneoff","One-off spend"],["income","Monthly income"],["oneoffin","One-off money in"]];
+  const t = e.kind === "income" ? (e.recurring ? "income" : "oneoffin") : (e.recurring ? "bill" : "oneoff");
+  $("#qOut").innerHTML = `<div class="card" style="gap:12px;background:var(--t3);border-color:transparent">
+    <div class="sub" style="margin:0;color:var(--t3k);font-weight:600">Check this, then save</div>
+    <div class="fgroup">
+      <div class="field wide"><label for="eType">What is it</label><select id="eType">${types.map(([k,l])=>`<option value="${k}" ${k===t?"selected":""}>${l}</option>`).join("")}</select></div>
+      <div class="field"><label for="eLabel">Name</label><input id="eLabel" value="${esc(e.label)}"></div>
+      <div class="field"><label for="eAmt">Amount (£)</label><input id="eAmt" inputmode="decimal" value="${e.amount ?? ""}"></div>
+      <div class="field"><label for="eGroup">Group</label><input id="eGroup" list="budgetGroups" value="${esc(e.group)}"></div>
+      <div class="field"><label for="eProp">Linked property</label><select id="eProp"><option value="">None</option>${S.properties.map(p=>`<option value="${p.id}" ${p.id===e.propertyId?"selected":""}>${esc(p.name)}</option>`).join("")}</select></div>
+      <div class="field" id="eDayWrap"><label for="eDay">Leaves account on day</label><input id="eDay" inputmode="numeric" value="${e.day || ""}" placeholder="1–31"></div>
+      <div class="field" id="eDateWrap"><label for="eDate">Date</label><input type="date" id="eDate" value="${e.date || todayISO()}"></div>
+    </div>
+    ${datalists()}
+    <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-act="close">Cancel</button><button type="button" class="btn primary" data-act="esave">Save</button></div>
+  </div>`;
+  eTypeSync();
+}
+function eTypeSync() { const v = $("#eType").value; const rec = v === "bill" || v === "income"; $("#eDayWrap").hidden = !rec; $("#eDateWrap").hidden = rec; }
+async function quickExpenseSave() {
+  const type = $("#eType").value, label = $("#eLabel").value.trim(), amount = num($("#eAmt").value);
+  if (!label || !amount) { toast("Add a name and an amount"); return; }
+  const group = $("#eGroup").value.trim(), propertyId = $("#eProp").value;
+  if (type === "bill" || type === "income") {
+    const ok = await save("budget", null, { label, type: type === "income" ? "income" : "expense", group: group || (type === "income" ? "Salaries" : "Other bills"), amount, day: num($("#eDay").value) || "", method: type === "income" ? "Salary" : "Direct debit", propertyId, startMonth: monthKey(new Date()), endMonth: "" });
+    if (ok) { closeModal(); toast(`Added ${label}: ${gbp(amount,1)} every month`); }
+  } else {
+    const date = $("#eDate").value || todayISO(); const mk = date.slice(0,7);
+    const cur = (S.months.find(m => m.id === mk) || {}).oneoffs || [];
+    const ok = await saveMonth(mk, { oneoffs: [...cur, { id: Date.now().toString(36), label, amount, kind: type === "oneoffin" ? "in" : "out", date, cat: group, propertyId }] });
+    if (ok) { closeModal(); toast(`Added ${label}: ${gbp(amount,1)} in ${monthLabel(mk)}`); }
+  }
+}
+document.addEventListener("change", (e) => { if (e.target.id === "eType") eTypeSync(); });
+
+// ---------- bank statement import ----------
+function csvRows(text) {
+  const rows = []; let row = [], f = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i+1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+    else if (c === '"') q = true;
+    else if (c === ",") { row.push(f); f = ""; }
+    else if (c === "\n" || c === "\r") { if (c === "\r" && text[i+1] === "\n") i++; row.push(f); rows.push(row); row = []; f = ""; }
+    else f += c;
+  }
+  if (f || row.length) { row.push(f); rows.push(row); }
+  return rows.filter(r => r.some(x => String(x).trim() !== ""));
+}
+function parseStmtDate(v) {
+  v = String(v||"").trim(); let m;
+  if ((m = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) return iso(new Date(+m[1], +m[2]-1, +m[3]));
+  if ((m = v.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/))) { const y = m[3].length === 2 ? 2000 + +m[3] : +m[3]; return iso(new Date(y, +m[2]-1, +m[1])); }
+  if ((m = v.match(/^(\d{1,2})[\s\-]([A-Za-z]{3,})[\s\-,]*(\d{2,4})/))) { const mi = qMonthIdx(m[2].toLowerCase()); if (mi >= 0) { const y = m[3].length === 2 ? 2000 + +m[3] : +m[3]; return iso(new Date(y, mi, +m[1])); } }
+  if ((m = v.match(/^([A-Za-z]{3,})\s+(\d{1,2}),?\s+(\d{4})/))) { const mi = qMonthIdx(m[1].toLowerCase()); if (mi >= 0) return iso(new Date(+m[3], mi, +m[2])); }
+  return "";
+}
+const moneyVal = v => { let t = String(v||"").trim(); if (!t) return null; const neg = /^\(.*\)$/.test(t) || /^-/.test(t) || /\bdr\b/i.test(t); t = t.replace(/[^\d.]/g, ""); if (!t) return null; const n = parseFloat(t); return isFinite(n) ? (neg ? -n : n) : null; };
+let IMP = null;
+function parseStatement(text, flip) {
+  const rows = csvRows(text.replace(/^﻿/, ""));
+  const hi = rows.findIndex(r => r.some(c => /date/i.test(c)) && r.length >= 3);
+  if (hi < 0) throw new Error("No header row with a Date column");
+  const H = rows[hi].map(h => String(h).trim().toLowerCase());
+  const find = (...pats) => { for (const p of pats) { const i = H.findIndex(h => p.test(h)); if (i >= 0) return i; } return -1; };
+  const cDate = find(/^date$/, /transaction date/, /date/);
+  const cDesc = find(/^description$/, /description/, /narrative/, /details/, /merchant/, /^name$/, /payee/, /counter ?party/, /memo/, /reference/);
+  const cOut = find(/paid out/, /money out/, /^debit/, /withdrawal/, /^out$/, /debit amount/);
+  const cIn = find(/paid in/, /money in/, /^credit/, /deposit/, /^in$/, /credit amount/);
+  const cAmt = find(/^amount$/, /amount(?!.*balance)/, /value/);
+  const cType = find(/^type$/, /transaction type/);
+  if (cDate < 0 || cDesc < 0 || (cAmt < 0 && cOut < 0)) throw new Error("Couldn't find the Date, Description and Amount columns");
+  const tx = [];
+  for (const r of rows.slice(hi + 1)) {
+    const date = parseStmtDate(r[cDate]); if (!date) continue;
+    let out = 0, inn = 0;
+    if (cOut >= 0 || cIn >= 0) { out = Math.abs(moneyVal(r[cOut]) || 0); inn = Math.abs(moneyVal(r[cIn]) || 0); if (!out && !inn && cAmt >= 0) { const a = moneyVal(r[cAmt]) || 0; if (a < 0) out = -a; else inn = a; } }
+    else { const a = moneyVal(r[cAmt]); if (a === null) continue; if (a < 0) out = -a; else inn = a; }
+    if (!out && !inn) continue;
+    tx.push({ date, desc: String(r[cDesc]||"").trim(), out, inn, type: cType >= 0 ? String(r[cType]||"").trim().toUpperCase() : "" });
+  }
+  // Credit card statements list spending as positive numbers. If almost nothing is "out", assume that.
+  const outs = tx.filter(t => t.out).length, ins = tx.filter(t => t.inn).length;
+  const cardStyle = flip ?? (cAmt >= 0 && cOut < 0 && outs < ins * 0.5);
+  if (cardStyle) for (const t of tx) { const o = t.out; t.out = t.inn; t.inn = o; }
+  return { tx, cardStyle };
+}
+function buildImportRows(tx) {
+  const groups = new Map();
+  for (const t of tx) { const k = (t.out ? "o:" : "i:") + merchantKey(t.desc); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(t); }
+  const existing = new Set(S.budget.map(b => merchantKey(b.label)));
+  const rows = [];
+  for (const [k, list] of groups) {
+    const isOut = k.startsWith("o:");
+    list.sort((a,b) => a.date < b.date ? -1 : 1);
+    const months = new Set(list.map(t => t.date.slice(0,7)));
+    const ddso = list.some(t => /^(DD|SO|D\/D|S\/O|STO|DDR)$/.test(t.type) || /\b(dd|direct debit|s\/o|standing order)\b/i.test(t.desc));
+    const recurring = months.size >= 2 || ddso;
+    const g = guessGroup(list[0].desc);
+    const amounts = list.map(t => isOut ? t.out : t.inn);
+    const days = list.map(t => +t.date.slice(8,10)); const dayMode = days.sort((a,b)=>days.filter(x=>x===b).length-days.filter(x=>x===a).length)[0];
+    const name = titleCase(merchantKey(list[0].desc) || list[0].desc).slice(0, 40);
+    const already = existing.has(merchantKey(list[0].desc));
+    const isMortgage = g.group === "Mortgage";
+    const isRentIn = !isOut && S.tenancies.some(t => String(t.tenantName||"").toLowerCase().split(/\s+/).some(w => w.length >= 3 && list[0].desc.toLowerCase().includes(w)));
+    if (recurring) {
+      const last = amounts[amounts.length - 1]; const varies = Math.max(...amounts) > Math.min(...amounts) * 1.1;
+      rows.push({ section: isOut ? "rec" : "recin", include: isOut && !already && !isMortgage, name, desc: list[0].desc, type: isOut ? "bill" : "income", amount: Math.round(last*100)/100, day: dayMode, date: list[list.length-1].date, group: isMortgage ? "" : (g.group || (isOut ? "" : "Salaries")), propertyId: g.propertyId, count: list.length, months: months.size, varies, note: already ? "Already in your budget" : isMortgage ? "Mortgages are already counted from Properties" : isRentIn ? "Looks like rent, which comes from the Rent tab" : varies ? "Amount changes month to month" : "" });
+    } else {
+      for (const t of list) rows.push({ section: isOut ? "one" : "onein", include: false, name: titleCase(t.desc).slice(0, 40), desc: t.desc, type: isOut ? "oneoff" : "oneoffin", amount: isOut ? t.out : t.inn, day: +t.date.slice(8,10), date: t.date, group: g.group === "Mortgage" ? "" : g.group, propertyId: g.propertyId, count: 1, months: 1, note: "" });
+    }
+  }
+  const ord = { rec: 0, one: 1, recin: 2, onein: 3 };
+  return rows.sort((a,b) => ord[a.section]-ord[b.section] || (a.section === "one" || a.section === "onein" ? (a.date < b.date ? -1 : 1) : b.amount - a.amount));
+}
+function importOpen() {
+  if (!canWrite) { toast("You can view this page but not change it"); return; }
+  IMP = null;
+  $("#modalRoot").innerHTML = `<div class="scrim" id="scrim"><div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="iTitle">
+    <header><h2 id="iTitle">Import a bank statement</h2><button class="btn ghost" data-act="close" aria-label="Close">✕</button></header>
+    <div style="padding:16px 18px;display:flex;flex-direction:column;gap:14px" id="impBody">
+      <p class="sub" style="margin:0;max-width:70ch">Download your statement as a <b>CSV</b> file from your bank's website or app (usually under Statements → Export or Download), then choose it here. Two or three months works best: payments that repeat are spotted as monthly bills. The file stays on this device; only the lines you choose are saved.</p>
+      <div class="row"><input type="file" id="impFile" accept=".csv,text/csv" class="input"></div>
+      <div id="impOut"></div>
+    </div></div></div>`;
+}
+function importRender() {
+  if (!IMP) return;
+  const sec = { rec: ["Repeating payments out", "Suggested as monthly bills. Untick anything you don't want."], one: ["Other payments out", "Tick the ones to add as one-off spends."], recin: ["Repeating money in", "Salaries and other regular income. Rent is already counted from the Rent tab."], onein: ["Other money in", "Refunds, bonuses and other one-off income."] };
+  const typeOpts = (r) => (r.section === "recin" || r.section === "onein" ? [["income","Monthly income"],["oneoffin","One-off money in"]] : [["bill","Monthly bill"],["oneoff","One-off spend"]]).map(([k,l]) => `<option value="${k}" ${r.type===k?"selected":""}>${l}</option>`).join("");
+  const propOpts = (r) => `<option value="">—</option>` + S.properties.map(p => `<option value="${p.id}" ${p.id===r.propertyId?"selected":""}>${esc(p.name)}</option>`).join("");
+  const selected = IMP.rows.filter(r => r.include);
+  const html = Object.keys(sec).map(k => {
+    const list = IMP.rows.map((r,i) => [r,i]).filter(([r]) => r.section === k); if (!list.length) return "";
+    const allOn = list.every(([r]) => r.include);
+    return `<details class="impsec" ${k==="rec"||k==="one"?"open":""}><summary><b>${sec[k][0]}</b> <span class="muted">${list.length}</span></summary>
+      <div class="row" style="justify-content:space-between"><span class="sub">${sec[k][1]}</span><button type="button" class="btn ghost small" data-act="impall" data-sec="${k}" data-on="${allOn?0:1}">${allOn?"Untick all":"Tick all"}</button></div>
+      <div class="tablewrap"><table class="imp"><thead><tr><th></th><th>Name</th><th>Add as</th><th>Group</th><th>Property</th><th class="n">Amount</th><th>${k.startsWith("rec")?"Day":"Date"}</th></tr></thead><tbody>
+      ${list.map(([r,i]) => `<tr class="${r.include?"":"off"}"><td><input type="checkbox" data-ir="${i}" data-if="include" ${r.include?"checked":""} aria-label="Include ${esc(r.name)}"></td>
+        <td><input data-ir="${i}" data-if="name" value="${esc(r.name)}" style="width:170px" aria-label="Name"><div class="sub" title="${esc(r.desc)}">${esc(r.desc.slice(0,38))}${r.count>1?` · ${r.count} payments`:""}</div>${r.note?`<div class="sub" style="color:var(--warn)">${esc(r.note)}</div>`:""}</td>
+        <td><select data-ir="${i}" data-if="type" aria-label="Add as">${typeOpts(r)}</select></td>
+        <td><input data-ir="${i}" data-if="group" list="budgetGroups" value="${esc(r.group)}" style="width:130px" aria-label="Group"></td>
+        <td><select data-ir="${i}" data-if="propertyId" aria-label="Property">${propOpts(r)}</select></td>
+        <td class="n"><input class="amt" data-ir="${i}" data-if="amount" inputmode="decimal" value="${r.amount}" aria-label="Amount"></td>
+        <td>${(r.type==="bill"||r.type==="income") ? `<input data-ir="${i}" data-if="day" inputmode="numeric" value="${r.day||""}" style="width:52px" aria-label="Day of month">` : `<span class="num">${fmtD(r.date)}</span>`}</td></tr>`).join("")}
+      </tbody></table></div></details>`;
+  }).join("");
+  const bills = selected.filter(r => r.type === "bill").reduce((a,r)=>a+num(r.amount),0);
+  const ones = selected.filter(r => r.type === "oneoff").reduce((a,r)=>a+num(r.amount),0);
+  $("#impOut").innerHTML = `<div class="banner">${IMP.tx.length} transactions from ${fmtD(IMP.from)} to ${fmtD(IMP.to)}. ${IMP.cardStyle ? "Read as a credit card statement (spending shown as positive)." : ""} <button type="button" class="btn ghost small" data-act="impflip">${IMP.cardStyle ? "It's a bank account" : "It's a credit card statement"}</button></div>
+    ${html}${datalists()}
+    <div class="row" style="justify-content:space-between;position:sticky;bottom:0;background:var(--surface);padding-block:10px;border-top:1px solid var(--line)">
+      <span class="sub"><b>${selected.length}</b> selected · monthly bills ${gbp(bills)} · one-offs ${gbp(ones)}</span>
+      <div class="row"><button type="button" class="btn" data-act="close">Cancel</button><button type="button" class="btn primary" data-act="impsave" ${selected.length?"":"disabled"}>Add ${selected.length} to budget</button></div>
+    </div>`;
+}
+async function importLoad(file, flip) {
+  try {
+    const text = await file.text();
+    const { tx, cardStyle } = parseStatement(text, flip);
+    if (!tx.length) throw new Error("No transactions found");
+    const dates = tx.map(t => t.date).sort();
+    IMP = { file, tx, cardStyle, from: dates[0], to: dates[dates.length-1], rows: buildImportRows(tx) };
+    importRender();
+  } catch (err) {
+    $("#impOut").innerHTML = `<div class="banner bad">Couldn't read that file: ${esc(err.message||"unknown problem")}. Make sure it's the CSV download (not PDF) and has Date, Description and Amount columns.</div>`;
+  }
+}
+async function importSave() {
+  if (!IMP) return;
+  const sel = IMP.rows.filter(r => r.include && num(r.amount));
+  const btn = document.querySelector('[data-act="impsave"]'); if (btn) { btn.disabled = true; btn.textContent = "Adding…"; }
+  let n = 0;
+  for (const r of sel.filter(r => r.type === "bill" || r.type === "income")) {
+    const ok = await save("budget", null, { label: r.name.trim() || "Payment", type: r.type === "income" ? "income" : "expense", group: r.group || (r.type === "income" ? "Salaries" : "Other bills"), amount: num(r.amount), day: num(r.day) || "", method: r.type === "income" ? "Salary" : "Direct debit", propertyId: r.propertyId || "", varies: r.varies ? "yes" : "", startMonth: IMP.from.slice(0,7), endMonth: "", notes: `From statement: ${r.desc}` });
+    if (ok) n++;
+  }
+  const byMonth = {};
+  for (const r of sel.filter(r => r.type === "oneoff" || r.type === "oneoffin")) (byMonth[r.date.slice(0,7)] = byMonth[r.date.slice(0,7)] || []).push(r);
+  for (const [mk, list] of Object.entries(byMonth)) {
+    const cur = (S.months.find(m => m.id === mk) || {}).oneoffs || [];
+    const add = list.map((r, j) => ({ id: Date.now().toString(36) + j, label: r.name.trim() || "Payment", amount: num(r.amount), kind: r.type === "oneoffin" ? "in" : "out", date: r.date, cat: r.group, propertyId: r.propertyId || "" }));
+    if (await saveMonth(mk, { oneoffs: [...cur, ...add] })) n += list.length;
+  }
+  closeModal(); toast(`Added ${n} item${n===1?"":"s"} to your budget`);
+}
+document.addEventListener("change", async (e) => {
+  const el = e.target;
+  if (el.id === "impFile" && el.files && el.files[0]) return importLoad(el.files[0]);
+  if (el.dataset && el.dataset.ir !== undefined && IMP) {
+    const r = IMP.rows[+el.dataset.ir]; const f = el.dataset.if;
+    r[f] = el.type === "checkbox" ? el.checked : el.value;
+    if (f === "type" || f === "include") importRender();
+    else if (f === "amount") importRender();
+  }
+});
 
 // ---------- boot ----------
 draw();
