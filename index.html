@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px/1.5 system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
-<title>Household Ledger</title>
+<title>Prab &amp; Shalini's Net Worth</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
@@ -18,13 +18,21 @@
   --body:"IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
   --mono:"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
   --r:10px;
+  /* soft tints for summary boxes */
+  --t1:#e3f3ea; --t1k:#2c6b47; --t2:#e2eefa; --t2k:#2d5d8a; --t3:#fcecd9; --t3k:#95591a;
+  --t4:#ece7f8; --t4k:#5b4a91; --t5:#f8f1d2; --t5k:#806613; --t6:#f9e3e6; --t6k:#9c3a4a;
+  --thead:#e8f0ec; --hdr:#e4ede8;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#101614; --surface:#18201d; --sunk:#0c110f; --line:#2b3632; --ink:#e3ebe7; --muted:#97a69f; --accent:#5fb3a5; --accent-ink:#0c1512; --saffron:#e0a64c;
-  --good:#7fcf96; --good-bg:#183324; --warn:#e8b65a; --warn-bg:#3a2b10; --bad:#f08b80; --bad-bg:#3d1b18; --info:#8dbbe6; --info-bg:#172a3d; --none:#9aa49f; --none-bg:#232b28; color-scheme:dark}}
+  --good:#7fcf96; --good-bg:#183324; --warn:#e8b65a; --warn-bg:#3a2b10; --bad:#f08b80; --bad-bg:#3d1b18; --info:#8dbbe6; --info-bg:#172a3d; --none:#9aa49f; --none-bg:#232b28; --t1:#173226; --t1k:#8fd3a9; --t2:#172a3d; --t2k:#9cc4ea; --t3:#3a2a16; --t3k:#eab274;
+  --t4:#262040; --t4k:#bcaef0; --t5:#332c12; --t5k:#e3cb6c; --t6:#3a1c22; --t6k:#f0a1ad;
+  --thead:#1d2925; --hdr:#141c19; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#101614; --surface:#18201d; --sunk:#0c110f; --line:#2b3632; --ink:#e3ebe7; --muted:#97a69f; --accent:#5fb3a5; --accent-ink:#0c1512; --saffron:#e0a64c;
-  --good:#7fcf96; --good-bg:#183324; --warn:#e8b65a; --warn-bg:#3a2b10; --bad:#f08b80; --bad-bg:#3d1b18; --info:#8dbbe6; --info-bg:#172a3d; --none:#9aa49f; --none-bg:#232b28; color-scheme:dark}
+  --good:#7fcf96; --good-bg:#183324; --warn:#e8b65a; --warn-bg:#3a2b10; --bad:#f08b80; --bad-bg:#3d1b18; --info:#8dbbe6; --info-bg:#172a3d; --none:#9aa49f; --none-bg:#232b28; --t1:#173226; --t1k:#8fd3a9; --t2:#172a3d; --t2k:#9cc4ea; --t3:#3a2a16; --t3k:#eab274;
+  --t4:#262040; --t4k:#bcaef0; --t5:#332c12; --t5k:#e3cb6c; --t6:#3a1c22; --t6k:#f0a1ad;
+  --thead:#1d2925; --hdr:#141c19; color-scheme:dark}
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:14px;line-height:1.5}
 .num,td.n,.money{font-family:var(--mono);font-variant-numeric:tabular-nums}
@@ -152,42 +160,36 @@ tr.grp td{background:var(--sunk);font-weight:600;font-size:12px;text-transform:u
 .toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 @media (prefers-reduced-motion:no-preference){.btn,.chip{transition:border-color .15s,background .15s}}
 @media (max-width:560px){.nw .val{font-size:21px}.brand h1{font-size:19px}}
+
+/* colour pass */
+header.top{background:var(--hdr)}
+.g-stats .stat{border-color:transparent}
+.g-stats .stat:nth-child(6n+1){background:var(--t1)} .g-stats .stat:nth-child(6n+1) .k{color:var(--t1k)}
+.g-stats .stat:nth-child(6n+2){background:var(--t2)} .g-stats .stat:nth-child(6n+2) .k{color:var(--t2k)}
+.g-stats .stat:nth-child(6n+3){background:var(--t3)} .g-stats .stat:nth-child(6n+3) .k{color:var(--t3k)}
+.g-stats .stat:nth-child(6n+4){background:var(--t4)} .g-stats .stat:nth-child(6n+4) .k{color:var(--t4k)}
+.g-stats .stat:nth-child(6n+5){background:var(--t5)} .g-stats .stat:nth-child(6n+5) .k{color:var(--t5k)}
+.g-stats .stat:nth-child(6n+6){background:var(--t6)} .g-stats .stat:nth-child(6n+6) .k{color:var(--t6k)}
+.g-stats .stat .k{font-weight:600}
+.att.bad{background:linear-gradient(var(--bad-bg),var(--surface) 70px)}
+.att.warn{background:linear-gradient(var(--warn-bg),var(--surface) 70px)}
+.att.info{background:linear-gradient(var(--info-bg),var(--surface) 70px)}
+th{background:var(--thead)}
+.card h3{color:var(--accent)} .att h3{color:var(--ink)}
+.mtab[aria-pressed="true"]{background:var(--t1)}
+.banner{border:1px solid color-mix(in srgb, var(--info) 25%, transparent)}
+.banner.bad{border-color:color-mix(in srgb, var(--bad) 25%, transparent)}
 </style>
 </head>
 <body>
-<!-- Firebase: logins (Authentication) and data (Cloud Firestore). Free Spark plan. -->
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<!-- Firebase: logins with 2-step verification (Authentication + Identity Platform, authenticator-app codes) and data (Cloud Firestore). Free Spark plan. -->
 <script src="config.js"></script>
-<style>
-#login{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px 16px}
-#login .box{width:min(380px,100%);background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:14px}
-#login h1{font-size:24px}
-#login .eyebrow{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
-#login label{font-size:12px;font-weight:500;color:var(--muted);display:flex;flex-direction:column;gap:4px}
-#login input{background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:10px;width:100%;font-size:15px}
-#login .err{color:var(--bad);font-size:13px;min-height:1em}
-#login .ok{color:var(--good);font-size:13px}
-#login .links{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
-.who-chip{font-size:12px;color:var(--muted)}
-</style>
-<div id="login" hidden>
-  <form class="box" id="loginForm" novalidate>
-    <div><div class="eyebrow">Private</div><h1>Household Ledger</h1></div>
-    <p class="sub" id="loginMsg">Sign in with the email and password set up for you.</p>
-    <label for="lgEmail">Email<input id="lgEmail" type="email" autocomplete="username" required></label>
-    <label for="lgPass">Password<input id="lgPass" type="password" autocomplete="current-password" required></label>
-    <div class="err" id="lgErr" role="alert"></div>
-    <button class="btn primary" type="submit" id="lgBtn" style="justify-content:center;padding:10px">Sign in</button>
-    <div class="links"><button class="btn ghost small" type="button" id="lgReset">Forgot password?</button><button class="btn ghost small" type="button" id="lgOut" hidden>Use a different account</button></div>
-  </form>
-</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
+// The page asks for its data connection by name. On this site it comes from Firebase once you're fully signed in.
 (function () {
-  "use strict";
-  var cfg = window.HL_FIREBASE_CONFIG;
   var resolveDb; var dbReady = new Promise(function (r) { resolveDb = r; });
+  window.__hlResolveDb = resolveDb;
   var fileSaver = { save: function (req) {
     var blob = req.data instanceof Blob ? req.data : new Blob([req.data], { type: /\.ics$/.test(req.filename) ? "text/calendar" : "application/json" });
     var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = req.filename;
@@ -196,116 +198,281 @@ tr.grp td{background:var(--sunk);font-weight:600;font-size:12px;text-transform:u
     return Promise.resolve({ status: "saved" });
   } };
   var userNS = { can: function () { return Promise.resolve(true); }, canEdit: function () { return Promise.resolve(true); }, isOwner: function () { return Promise.resolve(true); } };
-  // The page asks for capabilities by name; on this site they come from Firebase instead of Claude.
   window.claude = { use: function (name) {
     if (name === "db") return dbReady;
     if (name === "user") return Promise.resolve(userNS);
     if (name === "downloads") return Promise.resolve(fileSaver);
     return Promise.resolve(null);
   } };
+  window.HL_SITE = { email: "", signOut: function () {} };
+})();
+</script>
+<style>
+#login{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;align-items:flex-start;justify-content:center;padding:max(48px,env(safe-area-inset-top,0px)) 16px 24px;overflow-y:auto}
+#login .box{border-top:4px solid var(--accent);width:min(400px,100%);background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:14px}
+#login h1{font-size:24px}
+#login h2{font-size:18px}
+#login .eyebrow{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+#login label{font-size:12px;font-weight:500;color:var(--muted);display:flex;flex-direction:column;gap:4px}
+#login input{background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:10px;width:100%;font-size:15px}
+#login input.code{font-family:var(--mono);font-size:22px;letter-spacing:.3em;text-align:center}
+#login .err{color:var(--bad);font-size:13px}
+#login .err:empty{display:none}
+#login .note{color:var(--muted);font-size:13px}
+#login .links{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+#login .full{justify-content:center;padding:10px}
+#login ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:13px}
+#qr{align-self:center;background:#fff;padding:10px;border-radius:8px;line-height:0}
+#qr img,#qr canvas{width:180px;height:180px}
+.secret{font-family:var(--mono);font-size:14px;background:var(--sunk);border-radius:6px;padding:8px 10px;word-break:break-all;user-select:all}
+.stepdots{display:flex;gap:6px}
+.stepdots i{width:24px;height:4px;border-radius:2px;background:var(--line)}
+.stepdots i.on{background:var(--accent)}
+</style>
+<div id="login" hidden>
+  <div class="box">
+    <div><div class="eyebrow">Private · Household ledger</div><h1>Prab &amp; Shalini's Net Worth</h1></div>
 
-  var $ = function (id) { return document.getElementById(id); };
-  var showLogin = function (msg, isErr) {
-    $("login").hidden = false;
-    if (msg) { $(isErr ? "lgErr" : "loginMsg").textContent = msg; }
-    setTimeout(function () { var e = $("lgEmail"); if (e && !e.value) e.focus(); }, 30);
-  };
+    <form id="vSignin" class="lv" novalidate style="display:flex;flex-direction:column;gap:14px">
+      <p class="note" id="signinMsg">Sign in with the email and password set up for you.</p>
+      <label for="lgEmail">Email<input id="lgEmail" type="email" autocomplete="username" required></label>
+      <label for="lgPass">Password<input id="lgPass" type="password" autocomplete="current-password" required></label>
+      <div class="err" id="lgErr" role="alert"></div>
+      <button class="btn primary full" type="submit" id="lgBtn">Sign in</button>
+      <div class="links"><button class="btn ghost small" type="button" id="lgReset">Forgot password?</button></div>
+    </form>
 
-  if (!cfg || !cfg.apiKey || !window.firebase) {
-    document.addEventListener("DOMContentLoaded", function () {
-      showLogin(!window.firebase ? "Couldn't reach Google Firebase. Check your internet connection and reload." : "This site isn't connected to Firebase yet. Add your project's settings to config.js.", true);
-      $("loginForm").querySelectorAll("input,button").forEach(function (el) { el.disabled = true; });
-    });
-    resolveDb(null);
-    return;
-  }
+    <form id="vCode" class="lv" novalidate hidden style="flex-direction:column;gap:14px">
+      <h2>Enter your 6-digit code</h2>
+      <p class="note">Open your authenticator app and type the code shown for <b>Household Ledger</b>.</p>
+      <label for="mfaCode">Code<input id="mfaCode" class="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]*"></label>
+      <div class="err" id="codeErr" role="alert"></div>
+      <button class="btn primary full" type="submit" id="codeBtn">Continue</button>
+      <div class="links"><button class="btn ghost small" type="button" data-hl="back">Back</button></div>
+    </form>
 
-  firebase.initializeApp(cfg);
-  var auth = firebase.auth();
-  var fs = firebase.firestore();
-  try { fs.enablePersistence({ synchronizeTabs: true }).catch(function () {}); } catch (e) {}
+    <div id="vVerify" class="lv" hidden style="flex-direction:column;gap:14px">
+      <div class="stepdots" aria-hidden="true"><i class="on"></i><i></i></div>
+      <h2>Confirm your email</h2>
+      <p class="note">Before turning on 2-step sign-in, we need to check this email address is yours: <b id="verifyEmail"></b></p>
+      <ol><li>Press <b>Send link</b>.</li><li>Open the email from Firebase (check spam too) and click the link.</li><li>Come back here and press <b>I've clicked the link</b>.</li></ol>
+      <div class="err" id="verifyErr" role="alert"></div>
+      <p class="note" id="verifyMsg"></p>
+      <button class="btn full" type="button" data-hl="sendverify">Send link</button>
+      <button class="btn primary full" type="button" data-hl="checkverify">I've clicked the link</button>
+      <div class="links"><button class="btn ghost small" type="button" data-hl="signout">Sign out</button></div>
+    </div>
 
-  var denied = false;
-  var mapErr = function (err) {
-    var c = err && err.code;
+    <form id="vEnroll" class="lv" novalidate hidden style="flex-direction:column;gap:14px">
+      <div class="stepdots" aria-hidden="true"><i class="on"></i><i class="on"></i></div>
+      <h2>Set up 2-step sign-in</h2>
+      <ol>
+        <li>Install <b>Google Authenticator</b> or <b>Microsoft Authenticator</b> on your phone.</li>
+        <li>In the app, tap <b>+</b> and scan this code.</li>
+        <li>Type the 6-digit code the app shows.</li>
+      </ol>
+      <div id="qr" aria-label="QR code for your authenticator app"></div>
+      <div><p class="note" style="margin:0 0 4px">Can't scan? Enter this key in the app instead. <b>Save a copy of it somewhere safe</b>: it's how you get back in if you lose your phone.</p><div class="secret" id="secretKey">Preparing…</div></div>
+      <label for="enrollCode">6-digit code from the app<input id="enrollCode" class="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]*"></label>
+      <div class="err" id="enrollErr" role="alert"></div>
+      <button class="btn primary full" type="submit" id="enrollBtn">Turn on 2-step sign-in</button>
+      <div class="links"><button class="btn ghost small" type="button" data-hl="signout">Sign out</button></div>
+    </form>
+
+    <div id="vMsg" class="lv" hidden style="flex-direction:column;gap:14px">
+      <p id="msgText"></p>
+      <button class="btn primary full" type="button" data-hl="tosignin">Sign in</button>
+    </div>
+  </div>
+</div>
+<script type="module">
+const V = "10.12.2";
+const cfg = window.HL_FIREBASE_CONFIG;
+const $ = id => document.getElementById(id);
+const views = ["vSignin","vCode","vVerify","vEnroll","vMsg"];
+function show(v) {
+  $("login").hidden = false;
+  for (const id of views) { const el = $(id); el.hidden = id !== v; el.style.display = id === v ? "flex" : "none"; }
+  setTimeout(() => { const f = $(v).querySelector("input"); if (f && !f.value) f.focus(); }, 40);
+}
+const fail = (msg) => { show("vSignin"); $("lgErr").textContent = msg; $("vSignin").querySelectorAll("input,button").forEach(el => el.disabled = true); window.__hlResolveDb(null); };
+
+let fb;
+try {
+  if (!cfg || !cfg.apiKey) throw new Error("config");
+  const [appM, authM, fsM] = await Promise.all([
+    import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`),
+    import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`),
+    import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`)
+  ]);
+  fb = { ...appM, ...authM, ...fsM };
+} catch (e) {
+  fail(e && e.message === "config" ? "This site isn't connected to Firebase yet. Add your project's settings to config.js." : "Couldn't reach Google Firebase. Check your internet connection and reload.");
+}
+
+if (fb) {
+  const app = fb.initializeApp(cfg);
+  const auth = fb.getAuth(app);
+  let fs;
+  try { fs = fb.initializeFirestore(app, { localCache: fb.persistentLocalCache({ tabManager: fb.persistentMultipleTabManager() }) }); }
+  catch (e) { fs = fb.getFirestore(app); }
+
+  // ---- data adapter: the page's db calls -> Firestore ----
+  let denied = false;
+  const mapErr = (err) => {
+    const c = err && err.code;
     if (c === "permission-denied" || c === "unauthenticated") {
-      if (!denied) { denied = true; showLogin("This account isn't allowed to see the ledger. Sign in with your own account.", true); $("lgOut").hidden = false; }
+      if (!denied) { denied = true; fb.signOut(auth).finally(() => { show("vMsg"); $("msgText").textContent = "This account isn't allowed to see the ledger, or 2-step sign-in isn't complete. Sign in again."; }); }
       return { code: "invalid_argument", message: err.message };
     }
     if (c === "resource-exhausted") return { code: "quota_exceeded", message: err.message };
     return { code: "unavailable", message: (err && err.message) || "Unavailable" };
   };
-  var reject = function (err) { throw mapErr(err); };
-  var wrapSnap = function (s) { return { id: s.id, exists: s.exists, data: function () { return s.exists ? s.data() : undefined; }, metadata: s.metadata }; };
-  var wrapDoc = function (r) { return {
+  const reject = (e) => { throw mapErr(e); };
+  const wrapSnap = (s) => { const ex = s.exists(); return { id: s.id, exists: ex, data: () => ex ? s.data() : undefined, metadata: s.metadata }; };
+  const wrapQS = (qs) => ({ docs: qs.docs.map(wrapSnap), size: qs.size, empty: qs.empty, metadata: qs.metadata });
+  const wrapDoc = (r) => ({
     id: r.id, path: r.path,
-    get: function () { return r.get().then(wrapSnap, reject); },
-    set: function (d) { return r.set(d).catch(reject); },
-    update: function (d) { return r.update(d).catch(reject); },
-    delete: function () { return r.delete().catch(reject); },
-    onSnapshot: function (next, error) { return r.onSnapshot(function (s) { next(wrapSnap(s)); }, function (e) { var m = mapErr(e); if (error) error(m); }); },
-    collection: function (p) { return wrapCol(r.collection(p)); }
-  }; };
-  var wrapQuery = function (q) { return {
-    where: function (f, op, v) { return wrapQuery(q.where(f, op, v)); },
-    orderBy: function (f, d) { return wrapQuery(q.orderBy(f, d || "asc")); },
-    limit: function (n) { return wrapQuery(q.limit(n)); },
-    get: function () { return q.get().then(function (qs) { return { docs: qs.docs.map(wrapSnap), size: qs.size, empty: qs.empty }; }, reject); },
-    onSnapshot: function (next, error) { return q.onSnapshot(function (qs) { next({ docs: qs.docs.map(wrapSnap), size: qs.size, empty: qs.empty, metadata: qs.metadata }); }, function (e) { var m = mapErr(e); if (error) error(m); }); }
-  }; };
-  var wrapCol = function (c) { var w = wrapQuery(c); w.path = c.path;
-    w.doc = function (id) { return wrapDoc(id ? c.doc(String(id)) : c.doc()); };
-    w.add = function (d) { return c.add(d).then(wrapDoc, reject); };
+    get: () => fb.getDoc(r).then(wrapSnap, reject),
+    set: (d) => fb.setDoc(r, d).catch(reject),
+    update: (d) => fb.updateDoc(r, d).catch(reject),
+    delete: () => fb.deleteDoc(r).catch(reject),
+    onSnapshot: (next, error) => fb.onSnapshot(r, s => next(wrapSnap(s)), e => { const m = mapErr(e); if (error) error(m); }),
+    collection: (p) => wrapCol(fb.collection(r, p))
+  });
+  const wrapQuery = (q) => ({
+    where: (f, op, v) => wrapQuery(fb.query(q, fb.where(f, op, v))),
+    orderBy: (f, d) => wrapQuery(fb.query(q, fb.orderBy(f, d || "asc"))),
+    limit: (n) => wrapQuery(fb.query(q, fb.limit(n))),
+    get: () => fb.getDocs(q).then(wrapQS, reject),
+    onSnapshot: (next, error) => fb.onSnapshot(q, qs => next(wrapQS(qs)), e => { const m = mapErr(e); if (error) error(m); })
+  });
+  const wrapCol = (c) => { const w = wrapQuery(c); w.path = c.path;
+    w.doc = (id) => wrapDoc(id ? fb.doc(c, String(id)) : fb.doc(c));
+    w.add = (d) => fb.addDoc(c, d).then(wrapDoc, reject);
     return w; };
-  var db = { collection: function (p) { return wrapCol(fs.collection(p)); }, doc: function (p) { return wrapDoc(fs.doc(p)); } };
+  const db = { collection: (p) => wrapCol(fb.collection(fs, p)), doc: (p) => wrapDoc(fb.doc(fs, p)) };
 
-  var started = false;
-  window.HL_SITE = { email: "", signOut: function () { auth.signOut().then(function () { location.reload(); }); } };
-  auth.onAuthStateChanged(function (u) {
-    if (u) {
-      window.HL_SITE.email = u.email || "";
-      if (denied) return;
-      $("login").hidden = true;
-      if (!started) { started = true; resolveDb(db); }
-    } else if (started) {
-      location.reload();
-    } else {
-      showLogin();
+  // ---- sign-in flow ----
+  let started = false, resolver = null, totpSecret = null, enrolling = false;
+  window.HL_SITE.signOut = () => fb.signOut(auth).then(() => location.reload());
+  const authMsg = (c) => ({
+    "auth/too-many-requests": "Too many attempts. Wait a few minutes, or reset your password.",
+    "auth/network-request-failed": "No internet connection. Try again when you're back online.",
+    "auth/invalid-verification-code": "That code didn't match. Check the app and type the newest code.",
+    "auth/code-expired": "That code has expired. Type the newest code from the app.",
+    "auth/missing-code": "Type the 6-digit code from your authenticator app.",
+    "auth/operation-not-allowed": "2-step sign-in isn't switched on in Firebase yet. Finish the Firebase setup, then try again.",
+    "auth/requires-recent-login": "For safety, please sign in again before setting this up."
+  })[c] || null;
+
+  async function route(user) {
+    if (!user) { if (denied) return; if (started) location.reload(); else if (!enrolling) show("vSignin"); return; }
+    window.HL_SITE.email = user.email || "";
+    // 2-step sign-in is optional and switched off (REQUIRE_2STEP = false). Set it to true to require
+    // email confirmation and an authenticator app before entering; see README for the Firebase steps.
+    const REQUIRE_2STEP = false;
+    if (REQUIRE_2STEP && !user.emailVerified) { $("verifyEmail").textContent = user.email; show("vVerify"); return; }
+    if (REQUIRE_2STEP && fb.multiFactor(user).enrolledFactors.length === 0) { show("vEnroll"); startEnroll(user); return; }
+    if (denied) return;
+    $("login").hidden = true;
+    if (!started) { started = true; window.__hlResolveDb(db); }
+  }
+  fb.onAuthStateChanged(auth, route);
+
+  async function startEnroll(user) {
+    $("enrollErr").textContent = ""; $("secretKey").textContent = "Preparing…"; $("qr").innerHTML = ""; totpSecret = null;
+    try {
+      const session = await fb.multiFactor(user).getSession();
+      totpSecret = await fb.TotpMultiFactorGenerator.generateSecret(session);
+      const uri = totpSecret.generateQrCodeUrl(user.email, "Household Ledger");
+      $("secretKey").textContent = totpSecret.secretKey.replace(/(.{4})/g, "$1 ").trim();
+      if (window.QRCode) new QRCode($("qr"), { text: uri, width: 180, height: 180, correctLevel: QRCode.CorrectLevel.M });
+      else $("qr").hidden = true;
+    } catch (e) {
+      const c = e && e.code;
+      if (c === "auth/requires-recent-login") { await fb.signOut(auth); show("vMsg"); $("msgText").textContent = authMsg(c); return; }
+      $("secretKey").textContent = "—";
+      $("enrollErr").textContent = authMsg(c) || "Couldn't start 2-step setup. Reload the page and try again.";
+      console.error(e);
     }
-  });
+  }
 
-  document.addEventListener("submit", function (e) {
-    if (e.target.id !== "loginForm") return;
+  document.addEventListener("submit", async (e) => {
+    const id = e.target.id; if (!["vSignin","vCode","vEnroll"].includes(id)) return;
     e.preventDefault();
-    var email = $("lgEmail").value.trim(), pass = $("lgPass").value;
-    $("lgErr").textContent = "";
-    if (!email || !pass) { $("lgErr").textContent = "Enter your email and password."; return; }
-    $("lgBtn").disabled = true; $("lgBtn").textContent = "Signing in…";
-    auth.signInWithEmailAndPassword(email, pass).then(function () {
-      if (denied) location.reload();
-    }).catch(function (err) {
-      var c = err && err.code;
-      $("lgErr").textContent = c === "auth/too-many-requests" ? "Too many attempts. Wait a few minutes, or reset your password."
-        : c === "auth/network-request-failed" ? "No internet connection. Try again when you're back online."
-        : "That email and password don't match. Check them and try again.";
-    }).then(function () { $("lgBtn").disabled = false; $("lgBtn").textContent = "Sign in"; });
-  });
-  document.addEventListener("click", function (e) {
-    if (e.target.id === "lgReset") {
-      var email = $("lgEmail").value.trim();
-      if (!email) { $("lgErr").textContent = "Type your email above first, then press Forgot password."; $("lgEmail").focus(); return; }
-      auth.sendPasswordResetEmail(email).then(function () {}, function () {}).then(function () {
-        $("lgErr").textContent = ""; $("loginMsg").textContent = "If that email has an account, a reset link is on its way. Check your inbox and spam folder.";
-      });
+    if (id === "vSignin") {
+      const email = $("lgEmail").value.trim(), pass = $("lgPass").value;
+      $("lgErr").textContent = "";
+      if (!email || !pass) { $("lgErr").textContent = "Enter your email and password."; return; }
+      $("lgBtn").disabled = true; $("lgBtn").textContent = "Signing in…";
+      try { await fb.signInWithEmailAndPassword(auth, email, pass); }
+      catch (err) {
+        if (err && err.code === "auth/multi-factor-auth-required") {
+          resolver = fb.getMultiFactorResolver(auth, err); $("mfaCode").value = ""; $("codeErr").textContent = ""; show("vCode");
+        } else {
+          $("lgErr").textContent = authMsg(err && err.code) || "That email and password don't match. Check them and try again.";
+        }
+      } finally { $("lgBtn").disabled = false; $("lgBtn").textContent = "Sign in"; }
     }
-    if (e.target.id === "lgOut") { auth.signOut().then(function () { location.reload(); }); }
+    if (id === "vCode") {
+      const code = $("mfaCode").value.replace(/\D/g, "");
+      if (code.length !== 6) { $("codeErr").textContent = "Type all 6 digits."; return; }
+      const hint = resolver && resolver.hints.find(h => h.factorId === fb.TotpMultiFactorGenerator.FACTOR_ID);
+      if (!hint) { $("codeErr").textContent = "No authenticator app is set up for this account."; return; }
+      $("codeBtn").disabled = true;
+      try { await resolver.resolveSignIn(fb.TotpMultiFactorGenerator.assertionForSignIn(hint.uid, code)); }
+      catch (err) { $("codeErr").textContent = authMsg(err && err.code) || "That code didn't work. Try the newest code."; console.error(err); }
+      finally { $("codeBtn").disabled = false; }
+    }
+    if (id === "vEnroll") {
+      const code = $("enrollCode").value.replace(/\D/g, "");
+      if (!totpSecret) { $("enrollErr").textContent = "Setup didn't start. Reload the page and try again."; return; }
+      if (code.length !== 6) { $("enrollErr").textContent = "Type all 6 digits from the app."; return; }
+      $("enrollBtn").disabled = true; enrolling = true;
+      try {
+        await fb.multiFactor(auth.currentUser).enroll(fb.TotpMultiFactorGenerator.assertionForEnrollment(totpSecret, code), "Authenticator app");
+        await fb.signOut(auth);
+        show("vMsg"); $("msgText").innerHTML = "<b>2-step sign-in is on.</b> From now on you'll sign in with your password and then a code from the app. Sign in once more now to finish.";
+      } catch (err) {
+        enrolling = false;
+        $("enrollErr").textContent = authMsg(err && err.code) || "Couldn't turn on 2-step sign-in. Check the code and try again.";
+        console.error(err);
+      } finally { $("enrollBtn").disabled = false; }
+    }
   });
-})();
+
+  document.addEventListener("click", async (e) => {
+    const t = e.target.closest("[data-hl], #lgReset"); if (!t) return;
+    const a = t.dataset.hl || t.id;
+    if (a === "lgReset") {
+      const email = $("lgEmail").value.trim();
+      if (!email) { $("lgErr").textContent = "Type your email above first, then press Forgot password."; $("lgEmail").focus(); return; }
+      try { await fb.sendPasswordResetEmail(auth, email); } catch (err) {}
+      $("lgErr").textContent = ""; $("signinMsg").textContent = "If that email has an account, a reset link is on its way. Check your inbox and spam folder.";
+    }
+    if (a === "back") { resolver = null; show("vSignin"); }
+    if (a === "signout" || a === "tosignin") { enrolling = false; await fb.signOut(auth); $("lgPass").value = ""; show("vSignin"); }
+    if (a === "sendverify") {
+      $("verifyErr").textContent = "";
+      try { await fb.sendEmailVerification(auth.currentUser); $("verifyMsg").textContent = `Link sent to ${auth.currentUser.email}. It can take a minute to arrive.`; }
+      catch (err) { $("verifyErr").textContent = authMsg(err && err.code) || "Couldn't send the link. Wait a minute and try again."; }
+    }
+    if (a === "checkverify") {
+      $("verifyErr").textContent = "";
+      try {
+        await fb.reload(auth.currentUser);
+        if (auth.currentUser.emailVerified) { await auth.currentUser.getIdToken(true); route(auth.currentUser); }
+        else $("verifyErr").textContent = "Not confirmed yet. Click the link in the email, then press this again.";
+      } catch (err) { $("verifyErr").textContent = "Couldn't check. Try again in a moment."; }
+    }
+  });
+}
 </script>
 <header class="top">
   <div class="wrap">
     <div class="topbar">
-      <div class="brand"><span class="eyebrow" id="who">Household</span><h1>Household Ledger</h1></div>
+      <div class="brand"><span class="eyebrow">Household ledger</span><h1 id="who">Prab &amp; Shalini's Net Worth</h1></div>
       <div class="nw"><div class="label">Net worth</div><div class="val" id="nwTop">—</div></div>
     </div>
     <nav class="tabs" id="tabs" role="tablist">
@@ -377,7 +544,7 @@ let tenantFilter = "current";
 let dateFilter = "all";
 let quickUpdate = false;
 
-const names = () => ({ p1: S.settings.p1 || "Me", p2: S.settings.p2 || "Shalini", child: S.settings.child || "Arjun", joint:"Joint" });
+const names = () => ({ p1: (S.settings.p1 && S.settings.p1 !== "Me") ? S.settings.p1 : "Prab", p2: S.settings.p2 || "Shalini", child: S.settings.child || "Arjun", joint:"Joint" });
 const ownerName = k => names()[k] || k || "—";
 const inrRate = () => num(S.settings.inrPerGbp) || 0;
 const toGBP = (v, cur) => cur === "INR" ? (inrRate() ? num(v)/inrRate() : 0) : num(v);
@@ -633,7 +800,7 @@ function draw() {
   document.querySelectorAll("#tabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.tab===tab));
   const T = totals();
   $("#nwTop").textContent = gbp(T.net);
-  const n = names(); $("#who").textContent = `${n.p1} & ${n.p2}`;
+  const n = names(); $("#who").textContent = `${n.p1} & ${n.p2}'s Net Worth`; document.title = `${n.p1} & ${n.p2}'s Net Worth`;
   const v = $("#view");
   const scrollY = window.scrollY;
   if (!db) { v.innerHTML = connMsg; return; }
@@ -908,6 +1075,22 @@ function propCard(p) {
   </article>`;
 }
 
+function rentGroupHead(pid) {
+  const PR = monthRent(rentMonth, pid); const pp = byId("properties", pid) || {};
+  const plain = 'style="text-transform:none;letter-spacing:0;font-weight:500"';
+  return `<tr class="grp"><td>${esc(pp.name||"No property")} <span ${plain}>· ${PR.rows.length} tenant${PR.rows.length===1?"":"s"}</span></td><td class="n">${gbp(PR.expected)}</td><td class="n">${gbp(PR.received)}</td><td colspan="4">${PR.outstanding>0?`<span class="neg" ${plain}>${gbp(PR.outstanding)} outstanding</span>`:`<span class="pos" ${plain}>All received</span>`}</td><td></td></tr>`;
+}
+function rentRowHtml(t) {
+  const r=rentFor(t.id,rentMonth)||{}; const st=rentStatus(t,rentMonth,rentFor(t.id,rentMonth)); const method=r.method||(t.payMethod==="Cash"?"Cash":"Bank"); const p=byId("properties",t.propertyId)||{};
+  return `<tr data-tid="${t.id}"><td><b>${esc(t.tenantName)}</b><div class="sub">${rentProp==="all"?"":esc(p.name||"")+(t.room?" · ":"")}${t.room?esc(t.room):""}</div></td>
+        <td class="n"><input class="amt" id="due-${t.id}" data-f="due" inputmode="decimal" value="${has(r.due)?r.due:num(t.rent)}" ${ro()} aria-label="Rent due"></td>
+        <td class="n"><input class="amt" id="rec-${t.id}" data-f="received" inputmode="decimal" placeholder="0" value="${has(r.received)?r.received:""}" ${ro()} aria-label="Rent received"></td>
+        <td><div class="seg" role="group" aria-label="Paid by">${["Bank","Cash"].map(m=>`<button data-act="method" data-m="${m}" aria-pressed="${method===m}" ${ro()}>${m}</button>`).join("")}</div></td>
+        <td>${method==="Cash"?`<div class="seg" role="group" aria-label="Cash status">${["Collected","Banked"].map(m=>`<button data-act="cash" data-m="${m}" aria-pressed="${(r.cash||"Collected")===m}" ${ro()}>${m}</button>`).join("")}</div>`:'<span class="sub">—</span>'}</td>
+        <td><input type="date" id="dt-${t.id}" data-f="date" value="${r.date||""}" ${ro()} aria-label="Date received"></td>
+        <td><input id="nt-${t.id}" data-f="note" value="${esc(r.note||"")}" style="width:120px" ${ro()} aria-label="Note"></td>
+        <td>${STATUS_CHIP[st]}${canWrite&&st!=="paid"?` <button class="btn ghost small" data-act="paidfull">Paid in full</button>`:""}</td></tr>`;
+}
 VIEWS.rent = () => {
   const R = monthRent(rentMonth, rentProp);
   const rentable = S.properties.filter(p=>!/^Home/.test(p.kind||""));
@@ -926,15 +1109,7 @@ VIEWS.rent = () => {
       <div class="stat"><span class="k">Cash this month</span><span class="v">${gbp(R.cash)}</span><span class="h">${gbp(R.cashUnbanked)} not banked yet</span></div>
     </div>
     ${rows.length?`<div class="tablewrap"><table><thead><tr><th>Tenant</th><th class="n">Due</th><th class="n">Received</th><th>Paid by</th><th>Cash</th><th>Date</th><th>Note</th><th>Status</th></tr></thead><tbody>
-      ${rows.map(t=>{ const r=rentFor(t.id,rentMonth)||{}; const st=rentStatus(t,rentMonth,rentFor(t.id,rentMonth)); const method=r.method||(t.payMethod==="Cash"?"Cash":"Bank"); const p=byId("properties",t.propertyId)||{};
-        return `<tr data-tid="${t.id}"><td><b>${esc(t.tenantName)}</b><div class="sub">${esc(p.name||"")}${t.room?" · "+esc(t.room):""}</div></td>
-        <td class="n"><input class="amt" id="due-${t.id}" data-f="due" inputmode="decimal" value="${has(r.due)?r.due:num(t.rent)}" ${ro()} aria-label="Rent due"></td>
-        <td class="n"><input class="amt" id="rec-${t.id}" data-f="received" inputmode="decimal" placeholder="0" value="${has(r.received)?r.received:""}" ${ro()} aria-label="Rent received"></td>
-        <td><div class="seg" role="group" aria-label="Paid by">${["Bank","Cash"].map(m=>`<button data-act="method" data-m="${m}" aria-pressed="${method===m}" ${ro()}>${m}</button>`).join("")}</div></td>
-        <td>${method==="Cash"?`<div class="seg" role="group" aria-label="Cash status">${["Collected","Banked"].map(m=>`<button data-act="cash" data-m="${m}" aria-pressed="${(r.cash||"Collected")===m}" ${ro()}>${m}</button>`).join("")}</div>`:'<span class="sub">—</span>'}</td>
-        <td><input type="date" id="dt-${t.id}" data-f="date" value="${r.date||""}" ${ro()} aria-label="Date received"></td>
-        <td><input id="nt-${t.id}" data-f="note" value="${esc(r.note||"")}" placeholder="" style="width:120px" ${ro()} aria-label="Note"></td>
-        <td>${STATUS_CHIP[st]}${canWrite&&st!=="paid"?` <button class="btn ghost small" data-act="paidfull">Paid in full</button>`:""}</td></tr>`;}).join("")}
+      ${rows.map((t,i)=>{ const head = (rentProp==="all" && (!i || rows[i-1].propertyId!==t.propertyId)) ? rentGroupHead(t.propertyId) : ""; return head + rentRowHtml(t); }).join("")}
     </tbody></table></div>`:`<div class="empty">No tenancies running in ${monthLabel(rentMonth)}. Add tenants on the Tenants &amp; deposits tab and their rent shows up here each month.</div>`}
   </section>
   <section class="block">
@@ -1063,7 +1238,7 @@ VIEWS.settings = () => {
   return `<section class="block">
     <h2>Settings</h2>
     <div class="card"><form id="settingsForm" class="fgroup">
-      <div class="field"><label for="s-p1">Your name</label><input id="s-p1" value="${esc(S.settings.p1||"")}" placeholder="Me" ${ro()}></div>
+      <div class="field"><label for="s-p1">Your name</label><input id="s-p1" value="${esc(S.settings.p1||"")}" placeholder="Prab" ${ro()}></div>
       <div class="field"><label for="s-p2">Partner</label><input id="s-p2" value="${esc(S.settings.p2||"Shalini")}" ${ro()}></div>
       <div class="field"><label for="s-child">Son</label><input id="s-child" value="${esc(S.settings.child||"Arjun")}" ${ro()}></div>
       <div class="field"><label for="s-inr">Rupees per £1</label><input id="s-inr" inputmode="decimal" value="${esc(S.settings.inrPerGbp||"")}" ${ro()}><span class="hint">Used to convert Indian accounts. Check today's rate and update now and then.</span></div>
