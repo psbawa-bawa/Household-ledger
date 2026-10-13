@@ -837,7 +837,7 @@ VIEWS.overview = (T) => {
       <div class="stat"><span class="k">Total owed</span><span class="v">${gbp(T.liab)}</span><span class="h">Mortgages ${gbp(T.mort)}</span></div>
       <div class="stat"><span class="k">Rent in ${monthShort(mk)}</span><span class="v">${gbp(R.received)} <span class="muted" style="font-size:13px">/ ${gbp(R.expected)}</span></span><span class="h">${R.outstanding>0?`${gbp(R.outstanding)} still to come`:"All received"}</span></div>
       <div class="stat"><span class="k">Disposable in ${monthShort(mk)}</span><span class="v">${gbp(budgetFor(mk).disposable)}</span><span class="h">After bills and mortgages</span></div>
-      <div class="stat"><span class="k">Cash rent not banked</span><span class="v">${gbp(allCashUnbanked())}</span><span class="h">Across all months</span></div>
+      <div class="stat"><span class="k">Savings &amp; investments</span><span class="v">${gbp(T.inv+T.pens+T.cashS)}</span><span class="h">${S.accounts.length} account${S.accounts.length===1?"":"s"}</span></div>
     </div>
   </section>
   ${attentionBlock()}
@@ -1082,7 +1082,7 @@ function propCard(p) {
 function rentGroupHead(pid) {
   const PR = monthRent(rentMonth, pid); const pp = byId("properties", pid) || {};
   const plain = 'style="text-transform:none;letter-spacing:0;font-weight:500"';
-  return `<tr class="grp"><td>${esc(pp.name||"No property")} <span ${plain}>· ${PR.rows.length} tenant${PR.rows.length===1?"":"s"}</span></td><td class="n">${gbp(PR.expected)}</td><td class="n">${gbp(PR.received)}</td><td colspan="4">${PR.outstanding>0?`<span class="neg" ${plain}>${gbp(PR.outstanding)} outstanding</span>`:`<span class="pos" ${plain}>All received</span>`}</td><td></td></tr>`;
+  return `<tr class="grp"><td>${esc(pp.name||"No property")} <span ${plain}>· ${PR.rows.length} tenant${PR.rows.length===1?"":"s"}</span></td><td class="n">${gbp(PR.expected)}</td><td class="n">${gbp(PR.received)}</td><td colspan="3">${PR.outstanding>0?`<span class="neg" ${plain}>${gbp(PR.outstanding)} outstanding</span>`:`<span class="pos" ${plain}>All received</span>`}</td><td></td></tr>`;
 }
 function rentRowHtml(t) {
   const r=rentFor(t.id,rentMonth)||{}; const st=rentStatus(t,rentMonth,rentFor(t.id,rentMonth)); const method=r.method||(t.payMethod==="Cash"?"Cash":"Bank"); const p=byId("properties",t.propertyId)||{};
@@ -1090,7 +1090,6 @@ function rentRowHtml(t) {
         <td class="n"><input class="amt" id="due-${t.id}" data-f="due" inputmode="decimal" value="${has(r.due)?r.due:num(t.rent)}" ${ro()} aria-label="Rent due"></td>
         <td class="n"><input class="amt" id="rec-${t.id}" data-f="received" inputmode="decimal" placeholder="0" value="${has(r.received)?r.received:""}" ${ro()} aria-label="Rent received"></td>
         <td><div class="seg" role="group" aria-label="Paid by">${["Bank","Cash"].map(m=>`<button data-act="method" data-m="${m}" aria-pressed="${method===m}" ${ro()}>${m}</button>`).join("")}</div></td>
-        <td>${method==="Cash"?`<div class="seg" role="group" aria-label="Cash status">${["Collected","Banked"].map(m=>`<button data-act="cash" data-m="${m}" aria-pressed="${(r.cash||"Collected")===m}" ${ro()}>${m}</button>`).join("")}</div>`:'<span class="sub">—</span>'}</td>
         <td><input type="date" id="dt-${t.id}" data-f="date" value="${r.date||""}" ${ro()} aria-label="Date received"></td>
         <td><input id="nt-${t.id}" data-f="note" value="${esc(r.note||"")}" style="width:120px" ${ro()} aria-label="Note"></td>
         <td>${STATUS_CHIP[st]}${canWrite&&st!=="paid"?` <button class="btn ghost small" data-act="paidfull">Paid in full</button>`:""}</td></tr>`;
@@ -1103,16 +1102,16 @@ VIEWS.rent = () => {
   const yrTen = S.tenancies.filter(t => months.some(m=>tenancyActiveIn(t,m)) && (rentProp==="all"||t.propertyId===rentProp));
   const rows = [...R.rows].sort((a,b)=> ((byId("properties",a.propertyId)||{}).name||"").localeCompare((byId("properties",b.propertyId)||{}).name||"") || (a.room||"").localeCompare(b.room||"",undefined,{numeric:true}));
   return `<section class="block">
-    <div class="sechead"><div><h2>Rent for ${monthLabel(rentMonth)}</h2><p class="sub">Type what came in. Mark cash as collected, then as banked once it's paid in.</p></div>
+    <div class="sechead"><div><h2>Rent for ${monthLabel(rentMonth)}</h2><p class="sub">Type what came in and whether it was paid by bank or cash.</p></div>
       <div class="toolbar"><button class="btn small" data-act="month" data-d="-1" aria-label="Previous month">←</button><input class="input" type="month" id="rentMonth" value="${rentMonth}"><button class="btn small" data-act="month" data-d="1" aria-label="Next month">→</button>
       <select class="input" id="rentProp"><option value="all">All properties</option>${rentable.map(p=>`<option value="${p.id}" ${rentProp===p.id?"selected":""}>${esc(p.name)}</option>`).join("")}</select></div></div>
     <div class="grid g-stats">
       <div class="stat"><span class="k">Should come in</span><span class="v">${gbp(R.expected)}</span></div>
       <div class="stat"><span class="k">Received</span><span class="v">${gbp(R.received)}</span></div>
       <div class="stat"><span class="k">Outstanding</span><span class="v ${R.outstanding>0?"neg":""}">${gbp(R.outstanding)}</span></div>
-      <div class="stat"><span class="k">Cash this month</span><span class="v">${gbp(R.cash)}</span><span class="h">${gbp(R.cashUnbanked)} not banked yet</span></div>
+      <div class="stat"><span class="k">Cash this month</span><span class="v">${gbp(R.cash)}</span><span class="h">Bank ${gbp(R.received-R.cash)}</span></div>
     </div>
-    ${rows.length?`<div class="tablewrap"><table><thead><tr><th>Tenant</th><th class="n">Due</th><th class="n">Received</th><th>Paid by</th><th>Cash</th><th>Date</th><th>Note</th><th>Status</th></tr></thead><tbody>
+    ${rows.length?`<div class="tablewrap"><table><thead><tr><th>Tenant</th><th class="n">Due</th><th class="n">Received</th><th>Paid by</th><th>Date</th><th>Note</th><th>Status</th></tr></thead><tbody>
       ${rows.map((t,i)=>{ const head = (rentProp==="all" && (!i || rows[i-1].propertyId!==t.propertyId)) ? rentGroupHead(t.propertyId) : ""; return head + rentRowHtml(t); }).join("")}
     </tbody></table></div>`:`<div class="empty">No tenancies running in ${monthLabel(rentMonth)}. Add tenants on the Tenants &amp; deposits tab and their rent shows up here each month.</div>`}
   </section>
@@ -1182,15 +1181,14 @@ VIEWS.reports = () => {
       <div class="stat"><span class="k">Collected</span><span class="v">${gbp(R.all.received)}</span><span class="h">${pct(R.all.received,R.all.expected)} of rent due</span></div>
       <div class="stat"><span class="k">Into the bank</span><span class="v">${gbp(R.all.bank)}</span><span class="h">${pct(R.all.bank,R.all.received)} of collected</span></div>
       <div class="stat"><span class="k">In cash</span><span class="v">${gbp(R.all.cash)}</span><span class="h">${pct(R.all.cash,R.all.received)} of collected</span></div>
-      <div class="stat"><span class="k">Cash not yet banked</span><span class="v">${gbp(R.all.unbanked)}</span></div>
       <div class="stat"><span class="k">Outstanding</span><span class="v ${R.all.outstanding?"neg":""}">${gbp(R.all.outstanding)}</span></div>
     </div>
   </section>
   ${R.groups.length ? R.groups.map(g => `<section class="block">
     <div class="sechead"><h2>${esc(g.p.name)}</h2><span class="sub">Collected ${gbp(g.tot.received)} · bank ${gbp(g.tot.bank)} · cash ${gbp(g.tot.cash)}</span></div>
-    <div class="tablewrap"><table><thead><tr><th>Room</th><th>Tenant</th><th class="n">Due</th><th class="n">Collected</th><th class="n">Bank</th><th class="n">Cash</th><th class="n">Cash not banked</th><th class="n">Outstanding</th><th class="n">Months paid</th></tr></thead><tbody>
-      ${g.rows.map(r=>`<tr><td>${esc(r.t.room||"—")}</td><td><b>${esc(r.t.tenantName)}</b>${isCurrent(r.t)?"":' <span class="chip">Moved out</span>'}</td>${cell(r.expected)}${cell(r.received)}${cell(r.bank)}${cell(r.cash)}${cell(r.unbanked)}<td class="n ${r.outstanding?"neg":""}">${r.outstanding?gbp(r.outstanding):'<span class="muted">—</span>'}</td><td class="n">${r.monthsPaid} of ${r.monthsDue}</td></tr>`).join("")}
-    </tbody><tfoot><tr><td colspan="2">Total</td>${cell(g.tot.expected)}${cell(g.tot.received)}${cell(g.tot.bank)}${cell(g.tot.cash)}${cell(g.tot.unbanked)}${cell(g.tot.outstanding)}<td></td></tr></tfoot></table></div>
+    <div class="tablewrap"><table><thead><tr><th>Room</th><th>Tenant</th><th class="n">Due</th><th class="n">Collected</th><th class="n">Bank</th><th class="n">Cash</th><th class="n">Outstanding</th><th class="n">Months paid</th></tr></thead><tbody>
+      ${g.rows.map(r=>`<tr><td>${esc(r.t.room||"—")}</td><td><b>${esc(r.t.tenantName)}</b>${isCurrent(r.t)?"":' <span class="chip">Moved out</span>'}</td>${cell(r.expected)}${cell(r.received)}${cell(r.bank)}${cell(r.cash)}<td class="n ${r.outstanding?"neg":""}">${r.outstanding?gbp(r.outstanding):'<span class="muted">—</span>'}</td><td class="n">${r.monthsPaid} of ${r.monthsDue}</td></tr>`).join("")}
+    </tbody><tfoot><tr><td colspan="2">Total</td>${cell(g.tot.expected)}${cell(g.tot.received)}${cell(g.tot.bank)}${cell(g.tot.cash)}${cell(g.tot.outstanding)}<td></td></tr></tfoot></table></div>
     <details class="card" style="padding:12px 16px"><summary style="cursor:pointer;font-weight:600">Month by month</summary>
       <div class="tablewrap" style="margin-top:10px"><table><thead><tr><th>Month</th><th class="n">Due</th><th class="n">Bank</th><th class="n">Cash</th><th class="n">Total collected</th></tr></thead><tbody>
       ${R.months.map(mk=>{ const m=g.monthly[mk]||{expected:0,bank:0,cash:0}; return `<tr><td>${monthLabel(mk)}</td>${cell(m.expected)}${cell(m.bank)}${cell(m.cash)}${cell(m.bank+m.cash)}</tr>`; }).join("")}
@@ -1200,12 +1198,12 @@ VIEWS.reports = () => {
 function reportCSV() {
   const R = rentReport(); const q = v => `"${String(v ?? "").replace(/"/g,'""')}"`; const n2 = v => (Math.round(num(v)*100)/100).toFixed(2);
   const L = [[q("Rent report"), q(reportLabel())].join(","), "",
-    ["Property","Room","Tenant","Due","Collected","Bank","Cash","Cash not banked","Outstanding","Months paid","Months due"].map(q).join(",")];
+    ["Property","Room","Tenant","Due","Collected","Bank","Cash","Outstanding","Months paid","Months due"].map(q).join(",")];
   for (const g of R.groups) {
-    for (const r of g.rows) L.push([q(g.p.name), q(r.t.room), q(r.t.tenantName), n2(r.expected), n2(r.received), n2(r.bank), n2(r.cash), n2(r.unbanked), n2(r.outstanding), r.monthsPaid, r.monthsDue].join(","));
-    L.push([q(g.p.name+" total"), "", "", n2(g.tot.expected), n2(g.tot.received), n2(g.tot.bank), n2(g.tot.cash), n2(g.tot.unbanked), n2(g.tot.outstanding), "", ""].join(","));
+    for (const r of g.rows) L.push([q(g.p.name), q(r.t.room), q(r.t.tenantName), n2(r.expected), n2(r.received), n2(r.bank), n2(r.cash), n2(r.outstanding), r.monthsPaid, r.monthsDue].join(","));
+    L.push([q(g.p.name+" total"), "", "", n2(g.tot.expected), n2(g.tot.received), n2(g.tot.bank), n2(g.tot.cash), n2(g.tot.outstanding), "", ""].join(","));
   }
-  L.push([q("All properties"), "", "", n2(R.all.expected), n2(R.all.received), n2(R.all.bank), n2(R.all.cash), n2(R.all.unbanked), n2(R.all.outstanding), "", ""].join(","));
+  L.push([q("All properties"), "", "", n2(R.all.expected), n2(R.all.received), n2(R.all.bank), n2(R.all.cash), n2(R.all.outstanding), "", ""].join(","));
   L.push("", ["Property","Month","Due","Bank","Cash","Total collected"].map(q).join(","));
   for (const g of R.groups) for (const mk of R.months) { const m = g.monthly[mk] || {expected:0,bank:0,cash:0}; L.push([q(g.p.name), q(monthLabel(mk)), n2(m.expected), n2(m.bank), n2(m.cash), n2(m.bank+m.cash)].join(",")); }
   return "﻿" + L.join("\r\n");
