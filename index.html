@@ -1,0 +1,1285 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px/1.5 system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>Household Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: sticky header with net worth + scrollable tab strip; one working column of sections below, cards only for properties and accounts. */
+:root{
+  --bg:#eef1ee; --surface:#ffffff; --sunk:#e3e8e4; --line:#cfd8d2;
+  --ink:#14211c; --muted:#5b6b64; --accent:#1d5b52; --accent-ink:#ffffff; --saffron:#b9791a;
+  --good:#2f7a46; --good-bg:#e1f1e5; --warn:#9a6300; --warn-bg:#fbefd6; --bad:#b0362b; --bad-bg:#f8e2df; --info:#2d5d8a; --info-bg:#e2ecf6; --none:#6b7570; --none-bg:#e9ecea;
+  --display:"Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body:"IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --r:10px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#101614; --surface:#18201d; --sunk:#0c110f; --line:#2b3632; --ink:#e3ebe7; --muted:#97a69f; --accent:#5fb3a5; --accent-ink:#0c1512; --saffron:#e0a64c;
+  --good:#7fcf96; --good-bg:#183324; --warn:#e8b65a; --warn-bg:#3a2b10; --bad:#f08b80; --bad-bg:#3d1b18; --info:#8dbbe6; --info-bg:#172a3d; --none:#9aa49f; --none-bg:#232b28; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#101614; --surface:#18201d; --sunk:#0c110f; --line:#2b3632; --ink:#e3ebe7; --muted:#97a69f; --accent:#5fb3a5; --accent-ink:#0c1512; --saffron:#e0a64c;
+  --good:#7fcf96; --good-bg:#183324; --warn:#e8b65a; --warn-bg:#3a2b10; --bad:#f08b80; --bad-bg:#3d1b18; --info:#8dbbe6; --info-bg:#172a3d; --none:#9aa49f; --none-bg:#232b28; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:14px;line-height:1.5}
+.num,td.n,.money{font-family:var(--mono);font-variant-numeric:tabular-nums}
+h1,h2,h3{font-family:var(--display);margin:0;text-wrap:balance;font-weight:700}
+h2{font-size:20px} h3{font-size:16px}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wrap{max-width:1120px;margin:0 auto;padding-inline:16px}
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--bg);border-bottom:1px solid var(--line)}
+.topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-block:14px 8px}
+.brand{display:flex;flex-direction:column}
+.brand .eyebrow{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.brand h1{font-size:22px}
+.nw{text-align:right}
+.nw .label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.nw .val{font-family:var(--display);font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}
+nav.tabs{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;padding-bottom:0}
+nav.tabs::-webkit-scrollbar{display:none}
+nav.tabs button{background:none;border:0;padding:10px 12px;border-bottom:2px solid transparent;color:var(--muted);cursor:pointer;white-space:nowrap;font-weight:500}
+nav.tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+main{padding-block:20px 60px;display:flex;flex-direction:column;gap:28px}
+section.block{display:flex;flex-direction:column;gap:12px;min-width:0}
+.sechead{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.sub{color:var(--muted);font-size:13px}
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);padding:7px 12px;border-radius:8px;cursor:pointer;font-weight:500;font-size:13px}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--accent);padding:4px 6px}
+.btn.danger{color:var(--bad)}
+.btn.small{padding:4px 8px;font-size:12px}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.grid{display:grid;gap:14px}
+.g-stats{grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
+.g-cards{grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr))}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.stat{display:flex;flex-direction:column;gap:2px;padding:12px 14px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+.stat .k{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.stat .v{font-family:var(--mono);font-size:19px;font-weight:500;font-variant-numeric:tabular-nums}
+.stat .h{font-size:12px;color:var(--muted)}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px 16px}
+.kv div{display:flex;flex-direction:column;min-width:0}
+.kv .k{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.kv .v{font-family:var(--mono);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap;background:var(--none-bg);color:var(--none)}
+.chip.good{background:var(--good-bg);color:var(--good)} .chip.warn{background:var(--warn-bg);color:var(--warn)}
+.chip.bad{background:var(--bad-bg);color:var(--bad)} .chip.info{background:var(--info-bg);color:var(--info)}
+.chip.inr{background:transparent;border:1px solid var(--saffron);color:var(--saffron)}
+.tablewrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-weight:600;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--surface)}
+td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+td.n,th.n{text-align:right;white-space:nowrap}
+tfoot td{font-weight:600;border-top:1px solid var(--line)}
+.input,table input,table select{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:5px 7px;min-width:0}
+table input.amt{width:96px;text-align:right;font-family:var(--mono)}
+table input[type=date]{width:136px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.seg button{border:0;background:var(--surface);padding:5px 9px;font-size:12px;cursor:pointer;color:var(--muted)}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.rooms{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:6px}
+.room{border:1px dashed var(--line);border-radius:8px;padding:6px 8px;font-size:12px;min-width:0}
+.room b{display:block;font-size:11px;color:var(--muted);font-weight:600}
+.room.let{border-style:solid;background:var(--sunk)}
+.room span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.list{display:flex;flex-direction:column}
+.li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
+.li:last-child{border-bottom:0}
+.li .t{font-weight:500;min-width:0}
+.li .m{font-size:12px;color:var(--muted)}
+.bar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--sunk)}
+.bar i{display:block;height:100%}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+.ledger{display:grid;grid-template-columns:minmax(120px,1.4fr) repeat(12,minmax(26px,1fr));gap:3px;font-size:11px;min-width:520px}
+.ledger .hd{color:var(--muted);text-align:center}
+.ledger .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:6px}
+.ledger button{height:24px;border-radius:4px;border:0;cursor:pointer;background:var(--none-bg)}
+.ledger button.paid{background:var(--good)} .ledger button.part{background:var(--warn)} .ledger button.late{background:var(--bad)} .ledger button.na{background:transparent;border:1px dashed var(--line);cursor:default}
+.ledger button.cur{outline:2px solid var(--ink);outline-offset:1px}
+.mstrip{display:grid;grid-template-columns:repeat(12,minmax(68px,1fr));gap:6px;overflow-x:auto;padding-bottom:4px}
+.mtab{display:flex;flex-direction:column;align-items:flex-start;gap:2px;border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:7px 9px;cursor:pointer;text-align:left}
+.mtab span{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.mtab b{font-family:var(--mono);font-size:13px;font-weight:500;font-variant-numeric:tabular-nums}
+.mtab.now span::after{content:" •";color:var(--accent)}
+.mtab[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 -3px 0 var(--accent)}
+.g-att{grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));align-items:start}
+.att{border-top:3px solid var(--none)}
+.att.bad{border-top-color:var(--bad)} .att.warn{border-top-color:var(--warn)} .att.info{border-top-color:var(--info)}
+.att h3 .num{font-size:13px;font-weight:500}
+.li.dl{padding-left:10px;border-left:3px solid transparent}
+.li.dl.bad{border-left-color:var(--bad)} .li.dl.warn{border-left-color:var(--warn)} .li.dl.info{border-left-color:var(--info)} .li.dl.good{border-left-color:var(--good)} .li.dl.none{border-left-color:var(--line)}
+.li .m{overflow-wrap:anywhere}
+.att .li{grid-template-columns:minmax(0,1fr)}
+.att .li .row{justify-content:flex-start}
+.timeline{display:flex;flex-direction:column;gap:14px}
+.tgroup{display:grid;grid-template-columns:150px minmax(0,1fr);gap:12px;align-items:start}
+.tmonth{font-size:14px;padding-top:12px;position:sticky;top:110px}
+@media (max-width:640px){.tgroup{grid-template-columns:1fr}.tmonth{position:static;padding-top:0}}
+.plate{background:var(--saffron);color:var(--accent-ink);padding:0 6px;border-radius:3px;font-weight:600;letter-spacing:.04em}
+tr.grp td{background:var(--sunk);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.empty{border:1px dashed var(--line);border-radius:var(--r);padding:22px;color:var(--muted);text-align:center;display:flex;flex-direction:column;gap:10px;align-items:center}
+.banner{padding:10px 14px;border-radius:8px;background:var(--info-bg);color:var(--info);font-size:13px}
+.banner.bad{background:var(--bad-bg);color:var(--bad)}
+.scrim{position:fixed;inset:0;background:rgba(10,16,14,.5);z-index:50;display:flex;align-items:flex-start;justify-content:center;padding:max(16px,env(safe-area-inset-top,0px)) 16px 16px;overflow-y:auto}
+.modal{background:var(--surface);border-radius:12px;border:1px solid var(--line);width:min(640px,100%);display:flex;flex-direction:column;max-height:none}
+.modal header{padding:16px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:10px}
+.modal form{padding:16px 18px;display:flex;flex-direction:column;gap:16px}
+.fgroup{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:12px}
+.fgroup h4{grid-column:1/-1;margin:4px 0 -4px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-family:var(--body)}
+.field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.field.wide{grid-column:1/-1}
+.field label{font-size:12px;font-weight:500;color:var(--muted)}
+.field input,.field select,.field textarea{background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:8px 9px;width:100%}
+.field textarea{min-height:70px;resize:vertical}
+.field .hint{font-size:11px;color:var(--muted)}
+.modal footer{padding:12px 18px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;z-index:60}
+.chart svg{width:100%;height:auto;display:block}
+.muted{color:var(--muted)}
+.pos{color:var(--good)} .neg{color:var(--bad)}
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+@media (prefers-reduced-motion:no-preference){.btn,.chip{transition:border-color .15s,background .15s}}
+@media (max-width:560px){.nw .val{font-size:21px}.brand h1{font-size:19px}}
+</style>
+</head>
+<body>
+<!-- Firebase: logins (Authentication) and data (Cloud Firestore). Free Spark plan. -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="config.js"></script>
+<style>
+#login{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px 16px}
+#login .box{width:min(380px,100%);background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:14px}
+#login h1{font-size:24px}
+#login .eyebrow{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+#login label{font-size:12px;font-weight:500;color:var(--muted);display:flex;flex-direction:column;gap:4px}
+#login input{background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:10px;width:100%;font-size:15px}
+#login .err{color:var(--bad);font-size:13px;min-height:1em}
+#login .ok{color:var(--good);font-size:13px}
+#login .links{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.who-chip{font-size:12px;color:var(--muted)}
+</style>
+<div id="login" hidden>
+  <form class="box" id="loginForm" novalidate>
+    <div><div class="eyebrow">Private</div><h1>Household Ledger</h1></div>
+    <p class="sub" id="loginMsg">Sign in with the email and password set up for you.</p>
+    <label for="lgEmail">Email<input id="lgEmail" type="email" autocomplete="username" required></label>
+    <label for="lgPass">Password<input id="lgPass" type="password" autocomplete="current-password" required></label>
+    <div class="err" id="lgErr" role="alert"></div>
+    <button class="btn primary" type="submit" id="lgBtn" style="justify-content:center;padding:10px">Sign in</button>
+    <div class="links"><button class="btn ghost small" type="button" id="lgReset">Forgot password?</button><button class="btn ghost small" type="button" id="lgOut" hidden>Use a different account</button></div>
+  </form>
+</div>
+<script>
+(function () {
+  "use strict";
+  var cfg = window.HL_FIREBASE_CONFIG;
+  var resolveDb; var dbReady = new Promise(function (r) { resolveDb = r; });
+  var fileSaver = { save: function (req) {
+    var blob = req.data instanceof Blob ? req.data : new Blob([req.data], { type: /\.ics$/.test(req.filename) ? "text/calendar" : "application/json" });
+    var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = req.filename;
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+    return Promise.resolve({ status: "saved" });
+  } };
+  var userNS = { can: function () { return Promise.resolve(true); }, canEdit: function () { return Promise.resolve(true); }, isOwner: function () { return Promise.resolve(true); } };
+  // The page asks for capabilities by name; on this site they come from Firebase instead of Claude.
+  window.claude = { use: function (name) {
+    if (name === "db") return dbReady;
+    if (name === "user") return Promise.resolve(userNS);
+    if (name === "downloads") return Promise.resolve(fileSaver);
+    return Promise.resolve(null);
+  } };
+
+  var $ = function (id) { return document.getElementById(id); };
+  var showLogin = function (msg, isErr) {
+    $("login").hidden = false;
+    if (msg) { $(isErr ? "lgErr" : "loginMsg").textContent = msg; }
+    setTimeout(function () { var e = $("lgEmail"); if (e && !e.value) e.focus(); }, 30);
+  };
+
+  if (!cfg || !cfg.apiKey || !window.firebase) {
+    document.addEventListener("DOMContentLoaded", function () {
+      showLogin(!window.firebase ? "Couldn't reach Google Firebase. Check your internet connection and reload." : "This site isn't connected to Firebase yet. Add your project's settings to config.js.", true);
+      $("loginForm").querySelectorAll("input,button").forEach(function (el) { el.disabled = true; });
+    });
+    resolveDb(null);
+    return;
+  }
+
+  firebase.initializeApp(cfg);
+  var auth = firebase.auth();
+  var fs = firebase.firestore();
+  try { fs.enablePersistence({ synchronizeTabs: true }).catch(function () {}); } catch (e) {}
+
+  var denied = false;
+  var mapErr = function (err) {
+    var c = err && err.code;
+    if (c === "permission-denied" || c === "unauthenticated") {
+      if (!denied) { denied = true; showLogin("This account isn't allowed to see the ledger. Sign in with your own account.", true); $("lgOut").hidden = false; }
+      return { code: "invalid_argument", message: err.message };
+    }
+    if (c === "resource-exhausted") return { code: "quota_exceeded", message: err.message };
+    return { code: "unavailable", message: (err && err.message) || "Unavailable" };
+  };
+  var reject = function (err) { throw mapErr(err); };
+  var wrapSnap = function (s) { return { id: s.id, exists: s.exists, data: function () { return s.exists ? s.data() : undefined; }, metadata: s.metadata }; };
+  var wrapDoc = function (r) { return {
+    id: r.id, path: r.path,
+    get: function () { return r.get().then(wrapSnap, reject); },
+    set: function (d) { return r.set(d).catch(reject); },
+    update: function (d) { return r.update(d).catch(reject); },
+    delete: function () { return r.delete().catch(reject); },
+    onSnapshot: function (next, error) { return r.onSnapshot(function (s) { next(wrapSnap(s)); }, function (e) { var m = mapErr(e); if (error) error(m); }); },
+    collection: function (p) { return wrapCol(r.collection(p)); }
+  }; };
+  var wrapQuery = function (q) { return {
+    where: function (f, op, v) { return wrapQuery(q.where(f, op, v)); },
+    orderBy: function (f, d) { return wrapQuery(q.orderBy(f, d || "asc")); },
+    limit: function (n) { return wrapQuery(q.limit(n)); },
+    get: function () { return q.get().then(function (qs) { return { docs: qs.docs.map(wrapSnap), size: qs.size, empty: qs.empty }; }, reject); },
+    onSnapshot: function (next, error) { return q.onSnapshot(function (qs) { next({ docs: qs.docs.map(wrapSnap), size: qs.size, empty: qs.empty, metadata: qs.metadata }); }, function (e) { var m = mapErr(e); if (error) error(m); }); }
+  }; };
+  var wrapCol = function (c) { var w = wrapQuery(c); w.path = c.path;
+    w.doc = function (id) { return wrapDoc(id ? c.doc(String(id)) : c.doc()); };
+    w.add = function (d) { return c.add(d).then(wrapDoc, reject); };
+    return w; };
+  var db = { collection: function (p) { return wrapCol(fs.collection(p)); }, doc: function (p) { return wrapDoc(fs.doc(p)); } };
+
+  var started = false;
+  window.HL_SITE = { email: "", signOut: function () { auth.signOut().then(function () { location.reload(); }); } };
+  auth.onAuthStateChanged(function (u) {
+    if (u) {
+      window.HL_SITE.email = u.email || "";
+      if (denied) return;
+      $("login").hidden = true;
+      if (!started) { started = true; resolveDb(db); }
+    } else if (started) {
+      location.reload();
+    } else {
+      showLogin();
+    }
+  });
+
+  document.addEventListener("submit", function (e) {
+    if (e.target.id !== "loginForm") return;
+    e.preventDefault();
+    var email = $("lgEmail").value.trim(), pass = $("lgPass").value;
+    $("lgErr").textContent = "";
+    if (!email || !pass) { $("lgErr").textContent = "Enter your email and password."; return; }
+    $("lgBtn").disabled = true; $("lgBtn").textContent = "Signing in…";
+    auth.signInWithEmailAndPassword(email, pass).then(function () {
+      if (denied) location.reload();
+    }).catch(function (err) {
+      var c = err && err.code;
+      $("lgErr").textContent = c === "auth/too-many-requests" ? "Too many attempts. Wait a few minutes, or reset your password."
+        : c === "auth/network-request-failed" ? "No internet connection. Try again when you're back online."
+        : "That email and password don't match. Check them and try again.";
+    }).then(function () { $("lgBtn").disabled = false; $("lgBtn").textContent = "Sign in"; });
+  });
+  document.addEventListener("click", function (e) {
+    if (e.target.id === "lgReset") {
+      var email = $("lgEmail").value.trim();
+      if (!email) { $("lgErr").textContent = "Type your email above first, then press Forgot password."; $("lgEmail").focus(); return; }
+      auth.sendPasswordResetEmail(email).then(function () {}, function () {}).then(function () {
+        $("lgErr").textContent = ""; $("loginMsg").textContent = "If that email has an account, a reset link is on its way. Check your inbox and spam folder.";
+      });
+    }
+    if (e.target.id === "lgOut") { auth.signOut().then(function () { location.reload(); }); }
+  });
+})();
+</script>
+<header class="top">
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand"><span class="eyebrow" id="who">Household</span><h1>Household Ledger</h1></div>
+      <div class="nw"><div class="label">Net worth</div><div class="val" id="nwTop">—</div></div>
+    </div>
+    <nav class="tabs" id="tabs" role="tablist">
+      <button data-tab="overview" role="tab">Overview</button>
+      <button data-tab="budget" role="tab">Monthly budget</button>
+      <button data-tab="properties" role="tab">Properties</button>
+      <button data-tab="rent" role="tab">Rent</button>
+      <button data-tab="tenants" role="tab">Tenants &amp; deposits</button>
+      <button data-tab="money" role="tab">Investments &amp; savings</button>
+      <button data-tab="dates" role="tab">Key dates &amp; cars</button>
+      <button data-tab="settings" role="tab">Settings</button>
+    </nav>
+  </div>
+</header>
+<main class="wrap" id="view"><div class="empty">Loading your figures…</div></main>
+<div id="modalRoot"></div>
+
+<script>
+(() => {
+"use strict";
+// ---------- helpers ----------
+const $ = (s, el=document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const num = v => { const n = parseFloat(String(v ?? "").replace(/[,£₹\s]/g,"")); return isFinite(n) ? n : 0; };
+const has = v => v !== undefined && v !== null && v !== "";
+const gbp0 = new Intl.NumberFormat("en-GB",{style:"currency",currency:"GBP",maximumFractionDigits:0});
+const gbp2 = new Intl.NumberFormat("en-GB",{style:"currency",currency:"GBP",minimumFractionDigits:2,maximumFractionDigits:2});
+const inr0 = new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",maximumFractionDigits:0});
+const gbp = (v, dp) => (dp ? gbp2 : gbp0).format(num(v));
+const pct = v => has(v) ? num(v).toFixed(2).replace(/\.?0+$/,"") + "%" : "—";
+const todayISO = () => { const d = new Date(); return iso(d); };
+const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const parseD = s => { if (!s) return null; const [y,m,d] = s.split("-").map(Number); return new Date(y, m-1, d||1); };
+const fmtD = s => { const d = parseD(s); return d ? d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}) : "—"; };
+const daysUntil = s => { const d = parseD(s); if (!d) return null; const t = parseD(todayISO()); return Math.round((d - t)/86400000); };
+const monthKey = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+const monthLabel = k => { const [y,m] = k.split("-").map(Number); return new Date(y,m-1,1).toLocaleDateString("en-GB",{month:"long",year:"numeric"}); };
+const monthShort = k => { const [y,m] = k.split("-").map(Number); return new Date(y,m-1,1).toLocaleDateString("en-GB",{month:"short"}); };
+const addMonths = (k, n) => { const [y,m] = k.split("-").map(Number); return monthKey(new Date(y, m-1+n, 1)); };
+const REPEAT = {"Weekly":{d:7},"Monthly":{m:1},"Quarterly":{m:3},"6 months":{m:6},"Yearly":{m:12},"2 years":{m:24},"3 years":{m:36},"5 years":{m:60},"10 years":{m:120},"One-off":null};
+const rollDate = (fromISO, rep) => { const r = REPEAT[rep]; if (!r) return ""; const d = parseD(fromISO) || parseD(todayISO()); if (r.d) d.setDate(d.getDate()+r.d); else d.setMonth(d.getMonth()+r.m); return iso(d); };
+function dueChip(s, opts={}) {
+  const n = daysUntil(s);
+  if (n === null) return `<span class="chip">No date set</span>`;
+  if (n < 0) return `<span class="chip bad">Overdue ${-n}d</span>`;
+  if (n === 0) return `<span class="chip bad">Today</span>`;
+  const soon = opts.soon ?? 30, near = opts.near ?? 90;
+  const txt = n < 60 ? `${n}d` : n < 730 ? `${Math.round(n/30.4)} mo` : `${(n/365).toFixed(1)} yr`;
+  if (n <= soon) return `<span class="chip warn">In ${txt}</span>`;
+  if (n <= near) return `<span class="chip info">In ${txt}</span>`;
+  return `<span class="chip good">In ${txt}</span>`;
+}
+let toastT;
+function toast(msg){ let t = $(".toast"); if(!t){ t=document.createElement("div"); t.className="toast"; t.setAttribute("role","status"); document.body.appendChild(t);} t.textContent=msg; t.hidden=false; clearTimeout(toastT); toastT=setTimeout(()=>t.hidden=true,2200); }
+
+// ---------- state ----------
+const COLS = ["properties","checks","tenancies","rent","accounts","debts","vehicles","reminders","snapshots","budget","months"];
+let budgetMonth = monthKey(new Date());
+let rentBasis = "collected";
+try { const rb = localStorage.getItem("hl.rentBasis"); if (rb) rentBasis = rb; } catch(e){}
+const S = { settings:{}, loaded:{}, ...Object.fromEntries(COLS.map(c=>[c,[]])) };
+let db = null, canWrite = true, dlNS = null;
+let tab = "overview";
+try { const t = localStorage.getItem("hl.tab"); if (t) tab = t; } catch(e){}
+if (location.hash && location.hash.length > 1) tab = location.hash.slice(1);
+let rentMonth = monthKey(new Date());
+let rentProp = "all";
+let tenantFilter = "current";
+let dateFilter = "all";
+let quickUpdate = false;
+
+const names = () => ({ p1: S.settings.p1 || "Me", p2: S.settings.p2 || "Shalini", child: S.settings.child || "Arjun", joint:"Joint" });
+const ownerName = k => names()[k] || k || "—";
+const inrRate = () => num(S.settings.inrPerGbp) || 0;
+const toGBP = (v, cur) => cur === "INR" ? (inrRate() ? num(v)/inrRate() : 0) : num(v);
+
+// ---------- schemas ----------
+const OWNERS = () => [["p1",names().p1],["p2",names().p2],["joint","Joint"],["child",names().child]];
+const SCHEMA = {
+  properties: { title:"property", fields:[
+    {h:"The property"},
+    {k:"name",l:"Name",t:"text",req:1,ph:"e.g. Crawley HMO"},
+    {k:"kind",l:"Type",t:"select",o:["HMO","Single let","Home (where we live)","Holiday let","Other"]},
+    {k:"address",l:"Address",t:"text",wide:1},
+    {k:"owner",l:"Owned by",t:"select",o:OWNERS},
+    {k:"roomCount",l:"Lettable rooms",t:"number",hint:"HMO rooms; 1 for a single let"},
+    {k:"purchaseDate",l:"Bought on",t:"date"},
+    {k:"purchasePrice",l:"Purchase price (£)",t:"money"},
+    {k:"value",l:"Current value (£)",t:"money"},
+    {k:"valueAsOf",l:"Value as of",t:"date"},
+    {h:"Mortgage"},
+    {k:"lender",l:"Lender",t:"text"},
+    {k:"mortgageType",l:"Repayment type",t:"select",o:["Repayment","Interest only","Part and part","No mortgage"]},
+    {k:"balance",l:"Mortgage left (£)",t:"money"},
+    {k:"balanceAsOf",l:"Balance as of",t:"date"},
+    {k:"initialRate",l:"Rate when taken (%)",t:"pct"},
+    {k:"currentRate",l:"Current rate (%)",t:"pct"},
+    {k:"productStart",l:"Product started",t:"date"},
+    {k:"productEnd",l:"Product ends",t:"date"},
+    {k:"followOnRate",l:"Rate after product (SVR %)",t:"pct"},
+    {k:"monthlyPayment",l:"Monthly payment (£)",t:"money"},
+    {k:"termEnd",l:"Mortgage term ends",t:"date"},
+    {h:"Running costs"},
+    {k:"monthlyCosts",l:"Other monthly costs (£)",t:"money",hint:"Only used if no bills are linked to this property in Monthly budget"},
+    {k:"notes",l:"Notes",t:"textarea",wide:1}
+  ]},
+  checks: { title:"safety check or renewal", fields:[
+    {k:"propertyId",l:"Property",t:"select",o:()=>S.properties.map(p=>[p.id,p.name||"Untitled"])},
+    {k:"label",l:"What",t:"text",req:1,ph:"e.g. Gas safety certificate"},
+    {k:"lastDone",l:"Last done",t:"date"},
+    {k:"due",l:"Next due / expires",t:"date"},
+    {k:"repeat",l:"Repeats",t:"select",o:Object.keys(REPEAT)},
+    {k:"alertDays",l:"Warn me this many days before",t:"number",hint:"Default 30"},
+    {k:"provider",l:"Engineer / company",t:"text"},
+    {k:"contact",l:"Their phone or email",t:"text"},
+    {k:"reference",l:"Certificate / policy number",t:"text"},
+    {k:"cost",l:"Last cost (£)",t:"money"},
+    {k:"notes",l:"Notes",t:"textarea",wide:1}
+  ]},
+  tenancies: { title:"tenant", fields:[
+    {h:"Who and where"},
+    {k:"tenantName",l:"Tenant name(s)",t:"text",req:1},
+    {k:"propertyId",l:"Property",t:"select",o:()=>S.properties.filter(p=>!/^Home/.test(p.kind||"")).map(p=>[p.id,p.name||"Untitled"])},
+    {k:"room",l:"Room",t:"text",list:"roomsList",ph:"Room 1, or Whole property"},
+    {k:"phone",l:"Phone",t:"text"},
+    {k:"email",l:"Email",t:"text"},
+    {k:"status",l:"Status",t:"select",o:["Current","Moved out"]},
+    {h:"Rent"},
+    {k:"rent",l:"Monthly rent (£)",t:"money"},
+    {k:"rentDay",l:"Rent due day of month",t:"number",hint:"1–31"},
+    {k:"payMethod",l:"Usually pays by",t:"select",o:["Bank transfer","Cash"]},
+    {k:"startDate",l:"Moved in",t:"date"},
+    {k:"endDate",l:"Tenancy ends / moved out",t:"date"},
+    {h:"Deposit"},
+    {k:"deposit",l:"Deposit held (£)",t:"money"},
+    {k:"depositScheme",l:"Protection scheme",t:"select",o:["DPS","TDS","mydeposits","Not yet protected","No deposit taken"]},
+    {k:"depositRef",l:"Scheme reference",t:"text"},
+    {k:"depositStatus",l:"Deposit status",t:"select",o:["Held","Returned in full","Partly returned","Kept for damages"]},
+    {k:"depositReturned",l:"Amount returned (£)",t:"money"},
+    {k:"depositReturnedDate",l:"Returned on",t:"date"},
+    {k:"notes",l:"Notes",t:"textarea",wide:1}
+  ]},
+  accounts: { title:"account", fields:[
+    {k:"name",l:"Name",t:"text",req:1,ph:"e.g. Trading 212 ISA"},
+    {k:"provider",l:"Provider",t:"text",list:"providers"},
+    {k:"owner",l:"Belongs to",t:"select",o:OWNERS},
+    {k:"kind",l:"Type",t:"select",o:["Stocks & shares ISA","Junior ISA","Lifetime ISA","General investment account","Pension / SIPP","Workplace pension","Indian stocks (demat)","Indian mutual fund SIP","Indian fixed deposit / PPF","Cash savings","Current account","Premium Bonds","Gold","Crypto","Other"]},
+    {k:"currency",l:"Currency",t:"select",o:["GBP","INR"]},
+    {k:"value",l:"Current value",t:"money",hint:"In the account's own currency"},
+    {k:"contributed",l:"Total paid in",t:"money"},
+    {k:"monthly",l:"Monthly contribution / SIP",t:"money"},
+    {k:"sipDay",l:"Debit day of month",t:"number"},
+    {k:"asOf",l:"Value as of",t:"date"},
+    {k:"notes",l:"Notes",t:"textarea",wide:1}
+  ]},
+  debts: { title:"loan or card", fields:[
+    {k:"name",l:"Name",t:"text",req:1,ph:"e.g. Car finance"},
+    {k:"owner",l:"Whose",t:"select",o:OWNERS},
+    {k:"kind",l:"Type",t:"select",o:["Credit card","Personal loan","Car finance","Student loan","Overdraft","Family loan","Other"]},
+    {k:"balance",l:"Balance owed (£)",t:"money"},
+    {k:"rate",l:"Interest rate (%)",t:"pct"},
+    {k:"monthly",l:"Monthly payment (£)",t:"money"},
+    {k:"endDate",l:"Paid off by / 0% ends",t:"date"},
+    {k:"notes",l:"Notes",t:"textarea",wide:1}
+  ]},
+  vehicles: { title:"car", fields:[
+    {k:"name",l:"Car",t:"text",req:1,ph:"e.g. Family SUV"},
+    {k:"reg",l:"Registration",t:"text"},
+    {k:"owner",l:"Main driver",t:"select",o:OWNERS},
+    {h:"MOT, tax and service"},
+    {k:"motDue",l:"MOT due",t:"date"},
+    {k:"taxDue",l:"Road tax due",t:"date"},
+    {k:"taxCost",l:"Road tax per year (£)",t:"money"},
+    {k:"serviceDue",l:"Service due",t:"date"},
+    {k:"garage",l:"Garage",t:"text"},
+    {h:"Insurance"},
+    {k:"insuranceDue",l:"Insurance renewal",t:"date"},
+    {k:"insurer",l:"Insured with",t:"text",list:"insurers"},
+    {k:"policyNo",l:"Policy number",t:"text"},
+    {k:"insurancePremium",l:"Premium this year (£)",t:"money"},
+    {k:"insurerPhone",l:"Claims phone",t:"text"},
+    {h:"Breakdown cover"},
+    {k:"breakdownDue",l:"Breakdown cover renewal",t:"date"},
+    {k:"breakdownProvider",l:"Breakdown provider",t:"text",list:"breakdown"},
+    {k:"breakdownRef",l:"Membership number",t:"text"},
+    {h:"Value"},
+    {k:"value",l:"Approx value (£)",t:"money",hint:"Counts towards net worth"},
+    {k:"financeOwed",l:"Finance left (£)",t:"money"},
+    {k:"notes",l:"Notes",t:"textarea",wide:1}
+  ]},
+  reminders: { title:"reminder", fields:[
+    {k:"title",l:"What",t:"text",req:1},
+    {k:"category",l:"Category",t:"select",o:["Insurance","Home","Documents","Tax","Finance","Property","Car","Family","Health","Other"]},
+    {k:"who",l:"For",t:"select",o:()=>[["","Everyone"],...OWNERS()]},
+    {k:"due",l:"Due / expires",t:"date"},
+    {k:"repeat",l:"Repeats",t:"select",o:Object.keys(REPEAT)},
+    {k:"alertDays",l:"Warn me this many days before",t:"number",hint:"Default 30. Passports: 180"},
+    {k:"provider",l:"Company",t:"text",list:"insurers"},
+    {k:"reference",l:"Policy / reference number",t:"text"},
+    {k:"cost",l:"Cost per year (£)",t:"money"},
+    {k:"contact",l:"Phone or website",t:"text"},
+    {k:"notes",l:"Notes",t:"textarea",wide:1}
+  ]},
+  budget: { title:"regular income or bill", fields:[
+    {k:"label",l:"Name",t:"text",req:1,ph:"e.g. British Gas, Council tax, Salary"},
+    {k:"type",l:"Money in or out",t:"select",o:[["expense","Money out"],["income","Money in"]]},
+    {k:"group",l:"Group",t:"text",list:"budgetGroups",hint:"Bills with the same group are totalled together"},
+    {k:"amount",l:"Usual monthly amount (£)",t:"money"},
+    {k:"varies",l:"Amount changes each month",t:"select",o:[["","No, it's fixed"],["yes","Yes, check it each month"]]},
+    {k:"day",l:"Leaves account on day",t:"number",hint:"1–31"},
+    {k:"method",l:"Paid by",t:"select",o:["Direct debit","Standing order","Card","Salary","Cash","Other"]},
+    {k:"who",l:"Whose",t:"select",o:OWNERS},
+    {k:"propertyId",l:"Linked property",t:"select",o:()=>[["","None"],...S.properties.map(p=>[p.id,p.name||"Untitled"])],hint:"Bills linked to a let property count in its profit figures"},
+    {k:"startMonth",l:"From month",t:"month",hint:"Blank = always"},
+    {k:"endMonth",l:"Until month",t:"month",hint:"Blank = ongoing"},
+    {k:"notes",l:"Notes",t:"textarea",wide:1,ph:"Account number, supplier, contract end"}
+  ]}
+};
+
+// ---------- data writes ----------
+async function save(col, id, data) {
+  if (!db) { toast("Not connected — sign in to save"); return false; }
+  const clean = {}; for (const [k,v] of Object.entries(data)) if (v !== undefined) clean[k] = v;
+  clean.updatedAt = new Date().toISOString();
+  try { await db.collection(col).doc(id || undefined).set(clean); return true; }
+  catch (e) { handleWriteErr(e); return false; }
+}
+async function patch(col, id, data) {
+  try { await db.collection(col).doc(id).update({...data, updatedAt:new Date().toISOString()}); return true; }
+  catch (e) { handleWriteErr(e); return false; }
+}
+async function remove(col, id) {
+  try { await db.collection(col).doc(id).delete(); return true; } catch(e){ handleWriteErr(e); return false; }
+}
+function handleWriteErr(e){
+  if (e && e.code === "invalid_argument") { canWrite = false; toast("You can view this page but not change it"); render(); }
+  else if (e && e.code === "quota_exceeded") toast("Storage is full. Delete old rent months or reminders.");
+  else toast("Couldn't save. Check your connection and try again.");
+  console.error(e);
+}
+const byId = (col, id) => S[col].find(x => x.id === id);
+
+// ---------- calculations ----------
+function tenancyActiveIn(t, mk) {
+  const first = parseD(mk + "-01"); const last = new Date(first.getFullYear(), first.getMonth()+1, 0);
+  const s = parseD(t.startDate), e = parseD(t.endDate);
+  if (s && s > last) return false;
+  if (e && e < first) return false;
+  if (!e && t.status === "Moved out") return false;
+  return true;
+}
+const isCurrent = t => t.status !== "Moved out" && (!t.endDate || daysUntil(t.endDate) >= 0 || t.status === "Current");
+const rentDocId = (tid, mk) => `${tid}_${mk}`;
+const rentFor = (tid, mk) => S.rent.find(r => r.id === rentDocId(tid, mk));
+function rentStatus(t, mk, r) {
+  const due = r && has(r.due) ? num(r.due) : num(t.rent);
+  const got = r ? num(r.received) : 0;
+  if (due > 0 && got >= due) return "paid";
+  if (got > 0) return "part";
+  if (due === 0 && got === 0) return "none";
+  const day = Math.min(num(t.rentDay) || 1, 28);
+  const dueDate = parseD(`${mk}-${String(day).padStart(2,"0")}`);
+  return dueDate < parseD(todayISO()) ? "late" : "due";
+}
+const STATUS_CHIP = { paid:'<span class="chip good">Paid</span>', part:'<span class="chip warn">Part paid</span>', late:'<span class="chip bad">Not received</span>', due:'<span class="chip info">Due</span>', none:'<span class="chip">No rent</span>' };
+function monthRent(mk, propFilter="all") {
+  const rows = S.tenancies.filter(t => tenancyActiveIn(t, mk) && (propFilter==="all" || t.propertyId===propFilter));
+  let expected=0, received=0, cash=0, cashUnbanked=0;
+  for (const t of rows) { const r = rentFor(t.id, mk); const due = r && has(r.due) ? num(r.due) : num(t.rent); expected += due; const got = r ? num(r.received) : 0; received += got; if (r && r.method==="Cash") { cash += got; if (r.cash !== "Banked") cashUnbanked += got; } }
+  return { rows, expected, received, outstanding: Math.max(expected-received,0), cash, cashUnbanked };
+}
+const allCashUnbanked = () => S.rent.filter(r => r.method==="Cash" && r.cash!=="Banked").reduce((a,r)=>a+num(r.received),0);
+const propRentRoll = p => S.tenancies.filter(t => t.propertyId===p.id && isCurrent(t)).reduce((a,t)=>a+num(t.rent),0);
+const isPension = a => /pension|sipp/i.test(a.kind||"");
+function totals() {
+  let homeEq=0, rentalEq=0, propVal=0, mort=0;
+  for (const p of S.properties) { const v=num(p.value), b=num(p.balance); propVal+=v; mort+=b; if (/^Home/.test(p.kind||"")) homeEq+=v-b; else rentalEq+=v-b; }
+  let inv=0, cashS=0, pens=0; const byOwner={};
+  for (const a of S.accounts) { const g = toGBP(a.value, a.currency); if (isPension(a)) pens+=g; else if (/cash|current|premium/i.test(a.kind||"")) cashS+=g; else inv+=g; byOwner[a.owner||"joint"]=(byOwner[a.owner||"joint"]||0)+g; }
+  let veh=0, vehFin=0; for (const v of S.vehicles) { veh+=num(v.value); vehFin+=num(v.financeOwed); }
+  const debts = S.debts.reduce((a,d)=>a+num(d.balance),0) + vehFin;
+  const assets = propVal + inv + cashS + pens + veh;
+  const liab = mort + debts;
+  return { homeEq, rentalEq, propVal, mort, inv, cashS, pens, veh, debts, assets, liab, net: assets-liab, byOwner };
+}
+// Every date in the household, one shape. `soon` = warning window in days (item's own alertDays, else a sensible default).
+const VF = [["motDue","MOT",30],["taxDue","Road tax",30],["insuranceDue","Car insurance",30],["serviceDue","Car service",30],["breakdownDue","Breakdown cover",30]];
+function allDates(includeUndated) {
+  const out = [];
+  const ad = (x, def) => num(x) > 0 ? num(x) : def;
+  for (const c of S.checks) { const p = byId("properties", c.propertyId); out.push({cat:"Property", title:c.label, where:p?p.name:"", due:c.due, col:"checks", id:c.id, repeat:c.repeat, done:true, soon:ad(c.alertDays, /weekly/i.test(c.repeat||"")?2:30), provider:c.provider, ref:c.reference, cost:c.cost, contact:c.contact}); }
+  for (const p of S.properties) {
+    if (p.productEnd) out.push({cat:"Mortgage", title:`Mortgage deal ends (${pct(p.currentRate)})`, where:p.name, due:p.productEnd, col:"properties", id:p.id, soon:120, provider:p.lender});
+  }
+  for (const t of S.tenancies) if (isCurrent(t) && t.endDate) out.push({cat:"Tenancy", title:`Tenancy ends: ${t.tenantName||"tenant"}`, where:(byId("properties",t.propertyId)||{}).name||"", due:t.endDate, col:"tenancies", id:t.id, soon:60});
+  for (const v of S.vehicles) for (const [k,l,def] of VF) {
+    if (!v[k] && !includeUndated) continue;
+    const extra = k==="insuranceDue" ? {provider:v.insurer, ref:v.policyNo, cost:v.insurancePremium, contact:v.insurerPhone} : k==="breakdownDue" ? {provider:v.breakdownProvider, ref:v.breakdownRef} : k==="taxDue" ? {cost:v.taxCost} : k==="serviceDue" ? {provider:v.garage} : {};
+    out.push({cat:"Car", title:l, where:`${v.name||""}${v.reg?" · "+v.reg:""}`, due:v[k], col:"vehicles", id:v.id, vfield:k, done:true, soon:def, ...extra});
+  }
+  for (const r of S.reminders) if (!r.done) out.push({cat:r.category||"Other", title:r.title, where:r.who?ownerName(r.who):"", due:r.due, col:"reminders", id:r.id, repeat:r.repeat, done:true, soon:ad(r.alertDays,30), provider:r.provider, ref:r.reference, cost:r.cost, contact:r.contact});
+  for (const d of S.debts) if (d.endDate) out.push({cat:"Finance", title:`${d.name} ends`, where:"", due:d.endDate, col:"debts", id:d.id, soon:60});
+  const list = includeUndated ? out : out.filter(d => d.due);
+  return list.sort((a,b)=> (a.due||"9999") < (b.due||"9999") ? -1 : 1);
+}
+const undated = () => allDates(true).filter(d => !d.due);
+function attention() {
+  const dated = allDates();
+  const over = [], now = [], next = [];
+  for (const d of dated) { const n = daysUntil(d.due); if (n < 0) over.push(d); else if (n <= d.soon) now.push(d); else if (n <= 90) next.push(d); }
+  return { over, now, next };
+}
+
+// ---------- rendering ----------
+let renderPending = false, renderQueued = false;
+function render() {
+  const ae = document.activeElement;
+  if (ae && $("#view").contains(ae) && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) { renderQueued = true; return; }
+  if (renderPending) return; renderPending = true;
+  requestAnimationFrame(() => { renderPending = false; renderQueued = false; draw(); });
+}
+document.addEventListener("focusout", () => setTimeout(() => { if (renderQueued) render(); }, 30));
+
+function draw() {
+  document.querySelectorAll("#tabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.tab===tab));
+  const T = totals();
+  $("#nwTop").textContent = gbp(T.net);
+  const n = names(); $("#who").textContent = `${n.p1} & ${n.p2}`;
+  const v = $("#view");
+  const scrollY = window.scrollY;
+  if (!db) { v.innerHTML = connMsg; return; }
+  const ready = COLS.every(c => S.loaded[c]);
+  if (!ready) { v.innerHTML = `<div class="empty">Loading your figures…</div>`; return; }
+  v.innerHTML = (VIEWS[tab] || VIEWS.overview)(T) + datalists();
+  window.scrollTo(0, scrollY);
+}
+let connMsg = `<div class="empty">Loading your figures…</div>`;
+const datalists = () => `<datalist id="insurers">${["Admiral","Aviva","Direct Line","LV=","Churchill","AXA","Hastings Direct","esure","Saga","Zurich","Legal & General","Vitality","Bupa"].map(x=>`<option>${x}</option>`).join("")}</datalist><datalist id="breakdown">${["AA","RAC","Green Flag","Start Rescue"].map(x=>`<option>${x}</option>`).join("")}</datalist><datalist id="budgetGroups">${["Salaries","Home","HMO","Renaissance Court","Credit cards","Insurance","Subscriptions","Car","Children","Savings & investments","Other bills"].map(x=>`<option>${x}</option>`).join("")}</datalist><datalist id="ooCats">${["Repair","Holiday","School","Gift","Car repair","Furniture","Medical","Tax bill"].map(x=>`<option>${x}</option>`).join("")}</datalist><datalist id="roomsList"><option>Whole property</option>${Array.from({length:12},(_,i)=>`<option>Room ${i+1}</option>`).join("")}</datalist><datalist id="providers">${["Trading 212","AJ Bell","Hargreaves Lansdown","Vanguard","Zerodha","Groww","ICICI Direct","HDFC Securities","Nationwide","Monzo","Chase","NS&I"].map(x=>`<option>${x}</option>`).join("")}</datalist>`;
+const ro = () => canWrite ? "" : "disabled";
+const addBtn = (col, label, extra="") => canWrite ? `<button class="btn primary" data-act="new" data-col="${col}" ${extra}>+ ${label}</button>` : "";
+
+const VIEWS = {};
+VIEWS.overview = (T) => {
+  const mk = monthKey(new Date());
+  const R = monthRent(mk);
+  const segs = [["Home equity",T.homeEq,"var(--accent)"],["Rental equity",T.rentalEq,"var(--info)"],["Investments",T.inv,"var(--saffron)"],["Pensions",T.pens,"var(--good)"],["Cash",T.cashS,"var(--muted)"],["Cars",T.veh,"var(--line)"]].filter(s=>s[1]>0);
+  const sum = segs.reduce((a,s)=>a+s[1],0) || 1;
+  const morts = S.properties.filter(p => num(p.balance) > 0 || p.productEnd);
+  const snaps = [...S.snapshots].sort((a,b)=>a.id<b.id?-1:1);
+  const last = snaps.filter(s=>s.id<mk).slice(-1)[0];
+  const change = last ? T.net - num(last.net) : null;
+  const owners = OWNERS().map(([k,l]) => [l, T.byOwner[k]||0]).filter(x=>x[1]);
+  return `
+  <section class="block">
+    <div class="grid g-stats">
+      <div class="stat"><span class="k">Net worth</span><span class="v">${gbp(T.net)}</span><span class="h">${change===null?"Save a snapshot to track change":`${change>=0?"+":""}${gbp(change)} since ${monthLabel(last.id)}`}</span></div>
+      <div class="stat"><span class="k">Total assets</span><span class="v">${gbp(T.assets)}</span><span class="h">Property ${gbp(T.propVal)}</span></div>
+      <div class="stat"><span class="k">Total owed</span><span class="v">${gbp(T.liab)}</span><span class="h">Mortgages ${gbp(T.mort)}</span></div>
+      <div class="stat"><span class="k">Rent in ${monthShort(mk)}</span><span class="v">${gbp(R.received)} <span class="muted" style="font-size:13px">/ ${gbp(R.expected)}</span></span><span class="h">${R.outstanding>0?`${gbp(R.outstanding)} still to come`:"All received"}</span></div>
+      <div class="stat"><span class="k">Disposable in ${monthShort(mk)}</span><span class="v">${gbp(budgetFor(mk).disposable)}</span><span class="h">After bills and mortgages</span></div>
+      <div class="stat"><span class="k">Cash rent not banked</span><span class="v">${gbp(allCashUnbanked())}</span><span class="h">Across all months</span></div>
+    </div>
+  </section>
+  ${attentionBlock()}
+  ${portfolioBlock()}
+  <section class="block">
+    <div class="sechead"><h2>What makes up our wealth</h2>${canWrite?`<button class="btn" data-act="snapshot">Save ${monthShort(mk)} snapshot</button>`:""}</div>
+    <div class="card">
+      <div class="bar" role="img" aria-label="Asset mix">${segs.map(s=>`<i style="width:${(s[1]/sum*100).toFixed(2)}%;background:${s[2]}" title="${s[0]}: ${gbp(s[1])}"></i>`).join("")}</div>
+      <div class="legend">${segs.map(s=>`<span><i style="background:${s[2]}"></i>${s[0]} <b class="num">${gbp(s[1])}</b></span>`).join("") || '<span class="muted">Add property values and account balances to see the mix.</span>'}</div>
+      ${owners.length?`<div class="kv">${owners.map(([l,v])=>`<div><span class="k">${esc(l)} · savings &amp; investments</span><span class="v">${gbp(v)}</span></div>`).join("")}</div>`:""}
+      ${snaps.length>=2 ? `<div class="chart">${lineChart(snaps.map(s=>[s.id,num(s.net)]))}</div>` : `<p class="sub">Net worth history appears here after two monthly snapshots.</p>`}
+    </div>
+  </section>
+  <section class="block">
+    <div class="sechead"><h2>Mortgages</h2></div>
+    ${morts.length ? `<div class="tablewrap"><table><thead><tr><th>Property</th><th class="n">Left to pay</th><th class="n">Rate taken</th><th class="n">Rate now</th><th class="n">Monthly</th><th>Deal ends</th><th></th></tr></thead><tbody>
+      ${morts.map(p=>`<tr><td>${esc(p.name)}<div class="sub">${esc(p.lender||"")}</div></td><td class="n">${gbp(p.balance)}</td><td class="n">${pct(p.initialRate)}</td><td class="n">${pct(p.currentRate)}</td><td class="n">${gbp(p.monthlyPayment)}</td><td>${fmtD(p.productEnd)}</td><td>${dueChip(p.productEnd,{soon:90,near:180})}</td></tr>`).join("")}
+    </tbody><tfoot><tr><td>Total</td><td class="n">${gbp(T.mort)}</td><td></td><td></td><td class="n">${gbp(S.properties.reduce((a,p)=>a+num(p.monthlyPayment),0))}</td><td colspan="2"></td></tr></tfoot></table></div>` : `<div class="empty">Add your mortgages on the Properties tab.</div>`}
+  </section>`;
+};
+
+function portfolioBlock() {
+  const lets = S.properties.filter(p => !/^Home/.test(p.kind||""));
+  if (!lets.length) return "";
+  const rows = lets.map(p => {
+    const v=num(p.value), b=num(p.balance), rentY=propRentRoll(p)*12;
+    const interestY = b*num(p.currentRate)/100;
+    const costsY = propCosts(p)*12;
+    const profit = rentY - interestY - costsY;
+    return {p, v, b, eq:v-b, rentY, interestY, costsY, profit, roe: v-b>0 ? profit/(v-b)*100 : null};
+  });
+  const sum = k => rows.reduce((a,r)=>a+r[k],0);
+  const V=sum("v"), B=sum("b"), E=V-B, RY=sum("rentY"), IY=sum("interestY"), CY=sum("costsY"), PY=sum("profit");
+  const fixes = lets.filter(p=>p.productEnd && daysUntil(p.productEnd)>=0).sort((a,b)=>a.productEnd<b.productEnd?-1:1);
+  const next = fixes[0];
+  const gaps = S.checks.filter(c => lets.some(p=>p.id===c.propertyId)).filter(c => !c.due || daysUntil(c.due) < 0);
+  const noDate = gaps.filter(c=>!c.due), over = gaps.filter(c=>c.due);
+  const maxV = Math.max(...rows.map(r=>Math.max(r.v,r.b)), 1);
+  const maxR = Math.max(...rows.map(r=>Math.max(r.rentY, r.interestY+r.costsY)), 1);
+  const w = (x,m) => (Math.max(x,0)/m*100).toFixed(2)+"%";
+  return `<section class="block">
+    <div class="sechead"><div><h2>Rental portfolio</h2><p class="sub">${lets.length} let propert${lets.length>1?"ies":"y"}. Profit is rent less estimated mortgage interest and running costs, before tax.</p></div><button class="btn ghost" data-tabgo="properties">Properties →</button></div>
+    ${over.length||noDate.length?`<div class="banner ${over.length?"bad":""}">${over.length?`<b>${over.length} overdue:</b> ${over.slice(0,4).map(c=>`${esc(c.label)} (${esc((byId("properties",c.propertyId)||{}).name||"")})`).join(", ")}${over.length>4?"…":""}. `:""}${noDate.length?`${noDate.length} safety check${noDate.length>1?"s have":" has"} no date yet. Add the dates from your certificates on the Properties tab.`:""}</div>`:""}
+    <div class="grid g-stats">
+      <div class="stat"><span class="k">Portfolio value</span><span class="v">${gbp(V)}</span></div>
+      <div class="stat"><span class="k">Mortgages owed</span><span class="v">${gbp(B)}</span><span class="h">Loan to value ${V?Math.round(B/V*100)+"%":"—"}</span></div>
+      <div class="stat"><span class="k">Equity</span><span class="v">${gbp(E)}</span></div>
+      <div class="stat"><span class="k">Rent per month</span><span class="v">${gbp(RY/12)}</span><span class="h">Est. interest ${gbp(IY/12)}/mo</span></div>
+      <div class="stat"><span class="k">Profit per year</span><span class="v ${PY>=0?"":"neg"}">${gbp(PY)}</span><span class="h">Before tax</span></div>
+      <div class="stat"><span class="k">Next deal ends</span><span class="v">${next?daysUntil(next.productEnd)+" days":"—"}</span><span class="h">${next?`${esc(next.name)}, ${fmtD(next.productEnd)}`:"Add product end dates"}</span></div>
+    </div>
+    <div class="grid g-cards">
+      <div class="card"><div class="sechead"><h3>Equity against mortgage</h3><span class="sub">Bar length = value</span></div>
+        ${rows.map(r=>`<div style="display:grid;grid-template-columns:minmax(90px,30%) 1fr;gap:10px;align-items:center"><div style="min-width:0"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.p.name)}</div><div class="sub">LTV ${r.v?Math.round(r.b/r.v*100)+"%":"—"}</div></div>
+          <div class="bar" style="height:18px" title="Mortgage ${gbp(r.b)} · Equity ${gbp(r.eq)}"><i style="width:${w(r.b,maxV)};background:var(--saffron)"></i><i style="width:${w(r.eq,maxV)};background:var(--accent)"></i></div></div>`).join("")}
+        <div class="legend"><span><i style="background:var(--saffron)"></i>Mortgage</span><span><i style="background:var(--accent)"></i>Equity</span></div></div>
+      <div class="card"><div class="sechead"><h3>Where the rent goes</h3><span class="sub">Per year</span></div>
+        ${rows.map(r=>`<div style="display:grid;grid-template-columns:minmax(90px,30%) 1fr;gap:10px;align-items:center"><div style="min-width:0"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.p.name)}</div><div class="sub">Yield ${r.v&&r.rentY?(r.rentY/r.v*100).toFixed(1)+"%":"—"}</div></div>
+          <div class="bar" style="height:18px" title="Interest ${gbp(r.interestY)} · Costs ${gbp(r.costsY)} · Profit ${gbp(r.profit)}"><i style="width:${w(r.interestY,maxR)};background:var(--saffron)"></i><i style="width:${w(r.costsY,maxR)};background:var(--muted)"></i><i style="width:${w(r.profit,maxR)};background:var(--good)"></i></div></div>`).join("")}
+        <div class="legend"><span><i style="background:var(--saffron)"></i>Mortgage interest</span><span><i style="background:var(--muted)"></i>Other costs</span><span><i style="background:var(--good)"></i>Profit</span></div></div>
+    </div>
+    <div class="tablewrap"><table><thead><tr><th>Property</th><th class="n">Rent / yr</th><th class="n">Interest / yr</th><th class="n">Costs / yr</th><th class="n">Profit</th><th class="n">Return on equity</th></tr></thead><tbody>
+      ${rows.map(r=>`<tr><td>${esc(r.p.name)}</td><td class="n">${gbp(r.rentY)}</td><td class="n">${gbp(r.interestY)}</td><td class="n">${gbp(r.costsY)}</td><td class="n ${r.profit<0?"neg":""}">${gbp(r.profit)}</td><td class="n">${r.roe===null?"—":r.roe.toFixed(1)+"%"}</td></tr>`).join("")}
+    </tbody><tfoot><tr><td>Total</td><td class="n">${gbp(RY)}</td><td class="n">${gbp(IY)}</td><td class="n">${gbp(CY)}</td><td class="n ${PY<0?"neg":""}">${gbp(PY)}</td><td class="n">${E>0?(PY/E*100).toFixed(1)+"%":"—"}</td></tr></tfoot></table></div>
+  </section>`;
+}
+
+function lineChart(pts) {
+  const W=640,H=180,pl=64,pr=16,pt=14,pb=28;
+  const vals = pts.map(p=>p[1]); let lo=Math.min(...vals), hi=Math.max(...vals); if (lo===hi){lo-=1000;hi+=1000;}
+  const pad=(hi-lo)*.1; lo-=pad; hi+=pad;
+  const x=i=>pl+(W-pl-pr)*(pts.length===1?0.5:i/(pts.length-1)); const y=v=>pt+(H-pt-pb)*(1-(v-lo)/(hi-lo));
+  const ticks=[lo+(hi-lo)*.1, (lo+hi)/2, hi-(hi-lo)*.1];
+  const d=pts.map((p,i)=>`${i?"L":"M"}${x(i).toFixed(1)},${y(p[1]).toFixed(1)}`).join("");
+  const area=`${d}L${x(pts.length-1).toFixed(1)},${H-pb}L${x(0).toFixed(1)},${H-pb}Z`;
+  const step=Math.ceil(pts.length/8);
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Net worth by month">
+    ${ticks.map(t=>`<line x1="${pl}" x2="${W-pr}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)" stroke-width="1"/><text x="${pl-8}" y="${y(t)+4}" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--mono)">${gbp0.format(Math.round(t/1000)*1000).replace(/,000$/,"k")}</text>`).join("")}
+    <path d="${area}" fill="var(--accent)" fill-opacity=".12"/>
+    <path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2"/>
+    ${pts.map((p,i)=>`<circle cx="${x(i)}" cy="${y(p[1])}" r="${i===pts.length-1?4:2.5}" fill="var(--accent)"><title>${monthLabel(p[0])}: ${gbp(p[1])}</title></circle>${i%step===0||i===pts.length-1?`<text x="${x(i)}" y="${H-8}" text-anchor="middle" font-size="11" fill="var(--muted)">${monthShort(p[0])} ${p[0].slice(2,4)}</text>`:""}`).join("")}
+  </svg>`;
+}
+
+function dateRow(d, opts={}) {
+  const btn = canWrite && d.done && d.due ? `<button class="btn small" data-act="done" data-col="${d.col}" data-id="${d.id}" ${d.vfield?`data-vfield="${d.vfield}"`:""}>${d.repeat && REPEAT[d.repeat] && d.repeat!=="One-off" ? "Done · set next" : d.col==="vehicles" ? "Renewed +1 yr" : "Done"}</button>` : "";
+  const meta = [d.where, d.provider, d.ref?`Ref ${d.ref}`:"", has(d.cost)&&num(d.cost)?gbp(d.cost):"", d.contact].filter(Boolean).map(esc).join(" · ");
+  const n = daysUntil(d.due);
+  const stripe = !d.due ? "none" : n < 0 ? "bad" : n <= d.soon ? "warn" : n <= 90 ? "info" : "good";
+  return `<div class="li dl ${stripe}"><div class="t"><b>${esc(d.title)}</b>${opts.hideCat?"":` <span class="chip">${esc(d.cat)}</span>`}<div class="m">${d.due?`<span class="num">${fmtD(d.due)}</span>`:"No date yet"}${meta?" · "+meta:""}</div></div><div class="row">${d.due?dueChip(d.due,{soon:d.soon,near:90}):""}${btn}${canWrite?`<button class="btn ghost small" data-act="edit" data-col="${d.col}" data-id="${d.id}">${d.due?"Edit":"Add date"}</button>`:""}</div></div>`;
+}
+function attentionBlock() {
+  const A = attention(); const u = undated();
+  const col = (title, sub, list, cls, empty) => `<div class="card att ${cls}"><div class="sechead"><h3>${title} <span class="num muted">${list.length}</span></h3><span class="sub">${sub}</span></div>${list.length?`<div class="list">${list.slice(0,8).map(d=>dateRow(d)).join("")}</div>${list.length>8?`<button class="btn ghost small" data-tabgo="dates">+${list.length-8} more</button>`:""}`:`<p class="sub">${empty}</p>`}</div>`;
+  return `<section class="block">
+    <div class="sechead"><div><h2>Needs attention</h2><p class="sub">Renewals, certificates and deadlines, coloured by how close they are. Each item warns you as early as you set it to.</p></div><button class="btn ghost" data-tabgo="dates">All key dates →</button></div>
+    <div class="grid g-att">
+      ${col("Overdue","Sort these first",A.over,"bad","Nothing overdue.")}
+      ${col("Act now","Inside its warning window",A.now,"warn","Nothing needs booking yet.")}
+      ${col("Next 90 days","Coming up",A.next,"info","Nothing else in the next three months.")}
+    </div>
+    ${u.length?`<div class="banner">${u.length} item${u.length>1?"s have":" has"} no date yet, so ${u.length>1?"they":"it"} can't remind you. <button class="btn ghost small" data-act="gonodate">Add the dates</button></div>`:""}
+  </section>`;
+}
+
+function propCosts(p) {
+  const linked = S.budget.filter(l => l.type !== "income" && l.propertyId === p.id && (!l.endMonth || l.endMonth >= monthKey(new Date())));
+  return linked.length ? linked.reduce((a,l)=>a+num(l.amount),0) : num(p.monthlyCosts);
+}
+const gbpK = v => { const a = Math.abs(v); const s = v<0?"−":""; return a>=1000 ? `${s}£${(a/1000).toFixed(a>=10000?0:1)}k` : `${s}£${Math.round(a)}`; };
+function budgetFor(mk) {
+  const md = S.months.find(m=>m.id===mk) || {}; const ov = md.overrides || {};
+  const active = S.budget.filter(l => (!l.startMonth || l.startMonth <= mk) && (!l.endMonth || l.endMonth >= mk));
+  const amt = l => has(ov[l.id]) ? num(ov[l.id]) : num(l.amount);
+  const inc = active.filter(l => l.type === "income");
+  const out = active.filter(l => l.type !== "income");
+  const future = mk > monthKey(new Date());
+  const useExpected = future || rentBasis === "expected";
+  const rentRows = S.properties.filter(p=>!/^Home/.test(p.kind||"")).map(p => { const R = monthRent(mk, p.id); return {p, got:R.received, exp:R.expected, use: useExpected ? R.expected : R.received}; }).filter(r => r.exp || r.got);
+  const morts = S.properties.filter(p=>num(p.monthlyPayment)>0).map(p=>({label:`${p.name} mortgage`, sub:p.lender||"", amount:num(p.monthlyPayment), id:p.id, col:"properties"}));
+  const loans = S.debts.filter(d=>num(d.monthly)>0).map(d=>({label:d.name, sub:d.kind||"", amount:num(d.monthly), id:d.id, col:"debts"}));
+  const oneoffs = md.oneoffs || [];
+  const salaries = inc.reduce((a,l)=>a+amt(l),0);
+  const rent = rentRows.reduce((a,r)=>a+r.use,0);
+  const income = salaries + rent;
+  const fixed = out.reduce((a,l)=>a+amt(l),0);
+  const mortT = [...morts,...loans].reduce((a,x)=>a+x.amount,0);
+  const disposable = income - fixed - mortT;
+  const oneOut = oneoffs.filter(o=>o.kind!=="in").reduce((a,o)=>a+num(o.amount),0);
+  const oneIn = oneoffs.filter(o=>o.kind==="in").reduce((a,o)=>a+num(o.amount),0);
+  const left = disposable - oneOut + oneIn;
+  const any = income || fixed || mortT || oneoffs.length;
+  return { md, ov, amt, inc, out, rentRows, morts, loans, oneoffs, salaries, rent, income, fixed, mortT, disposable, oneOut, oneIn, left, any, useExpected, future };
+}
+VIEWS.budget = () => {
+  const mk = budgetMonth, yr = mk.slice(0,4);
+  const B = budgetFor(mk);
+  const months = Array.from({length:12},(_,i)=>`${yr}-${String(i+1).padStart(2,"0")}`);
+  const nowK = monthKey(new Date());
+  const strip = months.map(m => { const b = budgetFor(m); return `<button class="mtab ${m===nowK?"now":""}" data-act="bmonth" data-m="${m}" aria-pressed="${m===mk}"><span>${monthShort(m)}</span><b class="${b.any&&b.left<0?"neg":""}">${b.any?gbpK(b.left):"—"}</b></button>`; }).join("");
+  const amtInput = l => { const over = has(B.ov[l.id]); return `<input class="amt" id="bl-${l.id}" data-bl="${l.id}" inputmode="decimal" value="${over?B.ov[l.id]:(has(l.amount)?l.amount:"")}" placeholder="0" ${ro()} aria-label="${esc(l.label)} amount">${over&&num(B.ov[l.id])!==num(l.amount)?`<div class="sub">usual ${gbp(l.amount)}</div>`:""}`; };
+  const lineRow = l => `<tr><td><b>${esc(l.label)}</b>${l.varies?' <span class="chip warn">Check</span>':""}<div class="sub">${[l.method, l.day?`day ${esc(l.day)}`:"", l.who?ownerName(l.who):""].filter(Boolean).join(" · ")}</div></td><td class="n">${amtInput(l)}</td><td>${canWrite?`<button class="btn ghost small" data-act="edit" data-col="budget" data-id="${l.id}">Edit</button>`:""}</td></tr>`;
+  const groups = {}; for (const l of B.out) { const g = l.group || "Other bills"; (groups[g] = groups[g] || []).push(l); }
+  const gOrder = Object.keys(groups).sort((a,b)=>{ const o=["Home","HMO","Renaissance Court","Credit cards"]; const ia=o.indexOf(a), ib=o.indexOf(b); return (ia<0?99:ia)-(ib<0?99:ib) || a.localeCompare(b); });
+  const flow = [["Regular bills",B.fixed,"var(--muted)"],["Mortgages & loans",B.mortT,"var(--saffron)"],["One-offs",B.oneOut,"var(--bad)"],["Left over",Math.max(B.left,0),"var(--good)"]];
+  const flowTot = Math.max(B.income + B.oneIn, flow.reduce((a,f)=>a+f[1],0), 1);
+  const oo = [...B.oneoffs].sort((a,b)=>(a.date||"")<(b.date||"")?-1:1);
+  return `<section class="block">
+    <div class="sechead"><div><h2>Monthly budget</h2><p class="sub">Money in, less regular bills and mortgages, gives what you have to spend. One-offs come out of that.</p></div>
+      <div class="toolbar">${addBtn("budget","Add income or bill")}</div></div>
+    <div class="toolbar"><button class="btn small" data-act="byear" data-d="-1" aria-label="Previous year">← ${+yr-1}</button><b class="num">${yr}</b><button class="btn small" data-act="byear" data-d="1" aria-label="Next year">${+yr+1} →</button><span class="sub">Each month shows what was left at the end.</span></div>
+    <div class="mstrip">${strip}</div>
+  </section>
+  <section class="block">
+    <div class="sechead"><h2>${monthLabel(mk)}</h2>
+      <div class="toolbar"><span class="sub">Rent counted as</span><div class="seg" role="group" aria-label="Rent counted as">${[["collected","Collected"],["expected","Expected"]].map(([k,l])=>`<button data-act="rentbasis" data-m="${k}" aria-pressed="${(B.future?"expected":rentBasis)===k}" ${B.future?"disabled":""}>${l}</button>`).join("")}</div></div></div>
+    <div class="grid g-stats">
+      <div class="stat"><span class="k">Money in</span><span class="v">${gbp(B.income)}</span><span class="h">Salaries ${gbp(B.salaries)} · rent ${gbp(B.rent)}</span></div>
+      <div class="stat"><span class="k">Regular bills</span><span class="v">${gbp(B.fixed)}</span><span class="h">${B.out.length} direct debits and bills</span></div>
+      <div class="stat"><span class="k">Mortgages &amp; loans</span><span class="v">${gbp(B.mortT)}</span></div>
+      <div class="stat"><span class="k">Disposable income</span><span class="v ${B.disposable<0?"neg":"pos"}">${gbp(B.disposable)}</span><span class="h">Before one-offs</span></div>
+      <div class="stat"><span class="k">One-off spends</span><span class="v">${gbp(B.oneOut)}</span><span class="h">${B.oneIn?`Plus ${gbp(B.oneIn)} extra in`:`${B.oneoffs.length} this month`}</span></div>
+      <div class="stat"><span class="k">Left at month end</span><span class="v ${B.left<0?"neg":""}">${gbp(B.left)}</span></div>
+    </div>
+    ${B.income?`<div class="card" style="gap:8px"><div class="bar" style="height:20px" role="img" aria-label="Where the money goes">${flow.filter(f=>f[1]>0).map(f=>`<i style="width:${(f[1]/flowTot*100).toFixed(2)}%;background:${f[2]}" title="${f[0]}: ${gbp(f[1])}"></i>`).join("")}</div>
+      <div class="legend">${flow.map(f=>`<span><i style="background:${f[2]}"></i>${f[0]} <b class="num">${gbp(f[1])}</b> <span class="muted">${B.income?Math.round(f[1]/B.income*100)+"%":""}</span></span>`).join("")}</div></div>`:""}
+    <div class="grid g-cards" style="align-items:start">
+      <div class="tablewrap"><table><thead><tr><th>Money in</th><th class="n">${monthShort(mk)}</th><th></th></tr></thead><tbody>
+        ${B.inc.map(lineRow).join("")}
+        ${B.rentRows.map(r=>`<tr><td><b>Rent · ${esc(r.p.name)}</b><div class="sub">${gbp(r.got)} of ${gbp(r.exp)} collected</div></td><td class="n num">${gbp(r.use)}</td><td><button class="btn ghost small" data-act="gorent" data-m="${mk}">Rent</button></td></tr>`).join("")}
+        ${!B.inc.length&&!B.rentRows.length?`<tr><td colspan="3" class="sub">Add salaries with “Add income or bill”. Rent comes in from the Rent tab.</td></tr>`:""}
+      </tbody><tfoot><tr><td>Total in</td><td class="n">${gbp(B.income)}</td><td></td></tr></tfoot></table></div>
+      <div class="tablewrap"><table><thead><tr><th>Money out</th><th class="n">${monthShort(mk)}</th><th></th></tr></thead><tbody>
+        ${gOrder.map(g=>{ const ls=groups[g].sort((a,b)=>(a.label||"").localeCompare(b.label||"")); return `<tr class="grp"><td>${esc(g)}</td><td class="n">${gbp(ls.reduce((a,l)=>a+B.amt(l),0))}</td><td></td></tr>${ls.map(lineRow).join("")}`; }).join("")}
+        ${B.morts.length||B.loans.length?`<tr class="grp"><td>Mortgages &amp; loans</td><td class="n">${gbp(B.mortT)}</td><td></td></tr>${[...B.morts,...B.loans].map(x=>`<tr><td><b>${esc(x.label)}</b><div class="sub">${esc(x.sub)}</div></td><td class="n num">${gbp(x.amount)}</td><td>${canWrite?`<button class="btn ghost small" data-act="edit" data-col="${x.col}" data-id="${x.id}">Edit</button>`:""}</td></tr>`).join("")}`:`<tr class="grp"><td colspan="3">Mortgages: add monthly payments on the Properties tab</td></tr>`}
+      </tbody><tfoot><tr><td>Total out</td><td class="n">${gbp(B.fixed+B.mortT)}</td><td></td></tr></tfoot></table></div>
+    </div>
+  </section>
+  <section class="block">
+    <div class="sechead"><div><h2>One-offs in ${monthShort(mk)}</h2><p class="sub">Spends that aren't regular: repairs, holidays, school trips, a new boiler. Money that comes in once (a refund, a bonus) goes here too.</p></div></div>
+    <div class="tablewrap"><table><thead><tr><th>What</th><th>Date</th><th>Type</th><th class="n">Amount</th><th></th></tr></thead><tbody>
+      ${oo.map(o=>`<tr><td><b>${esc(o.label)}</b>${o.cat?`<div class="sub">${esc(o.cat)}</div>`:""}</td><td>${fmtD(o.date)}</td><td>${o.kind==="in"?'<span class="chip good">Money in</span>':'<span class="chip">Money out</span>'}</td><td class="n num ${o.kind==="in"?"pos":""}">${o.kind==="in"?"+":""}${gbp(o.amount,1)}</td><td>${canWrite?`<button class="btn ghost small danger" data-act="oodel" data-oid="${esc(o.id)}">Remove</button>`:""}</td></tr>`).join("")}
+      ${canWrite?`<tr><td><input id="oo-label" placeholder="e.g. HMO boiler repair" style="width:100%;min-width:140px" list="ooCats"></td><td><input type="date" id="oo-date" value="${mk===nowK?todayISO():mk+"-01"}"></td><td><select id="oo-kind"><option value="out">Money out</option><option value="in">Money in</option></select></td><td class="n"><input class="amt" id="oo-amt" inputmode="decimal" placeholder="0.00"></td><td><button class="btn primary small" data-act="ooadd">Add</button></td></tr>`:""}
+    </tbody>${oo.length?`<tfoot><tr><td colspan="3">Net one-offs</td><td class="n">${gbp(B.oneIn-B.oneOut,1)}</td><td></td></tr></tfoot>`:""}</table></div>
+    <div class="field"><label for="monthNotes">Notes for ${monthLabel(mk)}</label><textarea class="input" id="monthNotes" rows="2" ${ro()} placeholder="Anything to remember about this month">${esc(B.md.notes||"")}</textarea></div>
+  </section>`;
+};
+async function saveMonth(mk, patchObj) {
+  const cur = {...(S.months.find(m=>m.id===mk) || {})}; delete cur.id;
+  return save("months", mk, {...cur, ...patchObj});
+}
+
+VIEWS.properties = () => {
+  const props = [...S.properties].sort((a,b)=> (/^Home/.test(a.kind||"")?1:0)-(/^Home/.test(b.kind||"")?1:0));
+  return `<section class="block">
+    <div class="sechead"><div><h2>Properties</h2><p class="sub">Values, mortgages, rent roll and safety certificates for each property.</p></div>${addBtn("properties","Add property")}</div>
+    ${props.length ? `<div class="grid g-cards">${props.map(propCard).join("")}</div>` : `<div class="empty">No properties yet.${addBtn("properties","Add your first property")}</div>`}
+  </section>`;
+};
+function propCard(p) {
+  const home = /^Home/.test(p.kind||"");
+  const v=num(p.value), b=num(p.balance), eq=v-b, ltv=v?b/v*100:0;
+  const roll = propRentRoll(p), pay=num(p.monthlyPayment), costs=propCosts(p);
+  const yieldG = v && roll ? roll*12/v*100 : 0;
+  const flow = roll - pay - costs;
+  const tens = S.tenancies.filter(t=>t.propertyId===p.id && isCurrent(t));
+  const rc = Math.max(num(p.roomCount), 0);
+  let rooms = "";
+  if (!home) {
+    if (rc > 1) {
+      rooms = `<div class="rooms">${Array.from({length:rc},(_,i)=>{ const nm=`Room ${i+1}`; const t=tens.find(x=>(x.room||"").trim().toLowerCase()===nm.toLowerCase()); return `<div class="room ${t?"let":""}"><b>${nm}${t?` · ${gbp(t.rent)}`:""}</b><span>${t?esc(t.tenantName):'<span class="muted">Vacant</span>'}</span></div>`; }).join("")}</div>`;
+      const other = tens.filter(t=>!/^room \d+$/i.test((t.room||"").trim()));
+      if (other.length) rooms += `<div class="sub">${other.map(t=>`${esc(t.room||"No room set")}: ${esc(t.tenantName)}`).join(" · ")}</div>`;
+    } else {
+      rooms = tens.length ? `<div class="sub">Let to <b>${tens.map(t=>esc(t.tenantName)).join(", ")}</b> at ${gbp(roll)}/month</div>` : `<div class="sub">No current tenant recorded.</div>`;
+    }
+  }
+  const checks = S.checks.filter(c=>c.propertyId===p.id).sort((a,b)=>(a.due||"9999")<(b.due||"9999")?-1:1);
+  return `<article class="card">
+    <div class="sechead"><div style="min-width:0"><h3>${esc(p.name||"Untitled")}</h3><div class="sub">${esc(p.kind||"")}${p.address?" · "+esc(p.address):""}</div></div>
+      <div class="row">${canWrite?`<button class="btn small" data-act="edit" data-col="properties" data-id="${p.id}">Edit</button>`:""}</div></div>
+    <div class="kv">
+      <div><span class="k">Value</span><span class="v">${gbp(v)}</span></div>
+      <div><span class="k">Mortgage left</span><span class="v">${gbp(b)}</span></div>
+      <div><span class="k">Equity</span><span class="v">${gbp(eq)}</span></div>
+      <div><span class="k">Loan to value</span><span class="v">${v?ltv.toFixed(0)+"%":"—"}</span></div>
+      <div><span class="k">Rate taken → now</span><span class="v">${pct(p.initialRate)} → ${pct(p.currentRate)}</span></div>
+      <div><span class="k">Monthly payment</span><span class="v">${gbp(pay)}</span></div>
+      <div><span class="k">Deal ends</span><span class="v">${fmtD(p.productEnd)}</span></div>
+      <div><span class="k">After deal (SVR)</span><span class="v">${pct(p.followOnRate)}</span></div>
+      ${home?"":`<div><span class="k">Rent roll / month</span><span class="v">${gbp(roll)}</span></div>
+      <div><span class="k">Gross yield</span><span class="v">${yieldG?yieldG.toFixed(1)+"%":"—"}</span></div>
+      <div><span class="k">Cash flow / month</span><span class="v ${flow>=0?"pos":"neg"}">${gbp(flow)}</span></div>`}
+    </div>
+    ${p.productEnd?`<div class="row"><span class="sub">Mortgage deal</span>${dueChip(p.productEnd,{soon:90,near:180})}${daysUntil(p.productEnd)!==null&&daysUntil(p.productEnd)<=180&&daysUntil(p.productEnd)>=0?'<span class="sub">Start comparing remortgage deals now</span>':""}</div>`:""}
+    ${rooms}
+    <div class="sechead"><h3 style="font-size:14px">Safety checks &amp; renewals</h3>${canWrite?`<button class="btn ghost small" data-act="new" data-col="checks" data-prop="${p.id}">+ Add</button>`:""}</div>
+    ${checks.length?`<div class="list">${checks.map(c=>`<div class="li"><div class="t">${esc(c.label)}<div class="m">${c.lastDone?`Last ${fmtD(c.lastDone)} · `:""}${c.due?`Due ${fmtD(c.due)}`:"Add the due date"}${c.repeat&&c.repeat!=="One-off"?` · ${esc(c.repeat)}`:""}${c.provider?` · ${esc(c.provider)}`:""}</div></div><div class="row">${dueChip(c.due)}${canWrite?`<button class="btn small" data-act="done" data-col="checks" data-id="${c.id}">Done</button><button class="btn ghost small" data-act="edit" data-col="checks" data-id="${c.id}">Edit</button>`:""}</div></div>`).join("")}</div>`:`<div class="sub">No checks recorded.</div>`}
+  </article>`;
+}
+
+VIEWS.rent = () => {
+  const R = monthRent(rentMonth, rentProp);
+  const rentable = S.properties.filter(p=>!/^Home/.test(p.kind||""));
+  const yr = rentMonth.slice(0,4);
+  const months = Array.from({length:12},(_,i)=>`${yr}-${String(i+1).padStart(2,"0")}`);
+  const yrTen = S.tenancies.filter(t => months.some(m=>tenancyActiveIn(t,m)) && (rentProp==="all"||t.propertyId===rentProp));
+  const rows = [...R.rows].sort((a,b)=> ((byId("properties",a.propertyId)||{}).name||"").localeCompare((byId("properties",b.propertyId)||{}).name||"") || (a.room||"").localeCompare(b.room||"",undefined,{numeric:true}));
+  return `<section class="block">
+    <div class="sechead"><div><h2>Rent for ${monthLabel(rentMonth)}</h2><p class="sub">Type what came in. Mark cash as collected, then as banked once it's paid in.</p></div>
+      <div class="toolbar"><button class="btn small" data-act="month" data-d="-1" aria-label="Previous month">←</button><input class="input" type="month" id="rentMonth" value="${rentMonth}"><button class="btn small" data-act="month" data-d="1" aria-label="Next month">→</button>
+      <select class="input" id="rentProp"><option value="all">All properties</option>${rentable.map(p=>`<option value="${p.id}" ${rentProp===p.id?"selected":""}>${esc(p.name)}</option>`).join("")}</select></div></div>
+    <div class="grid g-stats">
+      <div class="stat"><span class="k">Should come in</span><span class="v">${gbp(R.expected)}</span></div>
+      <div class="stat"><span class="k">Received</span><span class="v">${gbp(R.received)}</span></div>
+      <div class="stat"><span class="k">Outstanding</span><span class="v ${R.outstanding>0?"neg":""}">${gbp(R.outstanding)}</span></div>
+      <div class="stat"><span class="k">Cash this month</span><span class="v">${gbp(R.cash)}</span><span class="h">${gbp(R.cashUnbanked)} not banked yet</span></div>
+    </div>
+    ${rows.length?`<div class="tablewrap"><table><thead><tr><th>Tenant</th><th class="n">Due</th><th class="n">Received</th><th>Paid by</th><th>Cash</th><th>Date</th><th>Note</th><th>Status</th></tr></thead><tbody>
+      ${rows.map(t=>{ const r=rentFor(t.id,rentMonth)||{}; const st=rentStatus(t,rentMonth,rentFor(t.id,rentMonth)); const method=r.method||(t.payMethod==="Cash"?"Cash":"Bank"); const p=byId("properties",t.propertyId)||{};
+        return `<tr data-tid="${t.id}"><td><b>${esc(t.tenantName)}</b><div class="sub">${esc(p.name||"")}${t.room?" · "+esc(t.room):""}</div></td>
+        <td class="n"><input class="amt" id="due-${t.id}" data-f="due" inputmode="decimal" value="${has(r.due)?r.due:num(t.rent)}" ${ro()} aria-label="Rent due"></td>
+        <td class="n"><input class="amt" id="rec-${t.id}" data-f="received" inputmode="decimal" placeholder="0" value="${has(r.received)?r.received:""}" ${ro()} aria-label="Rent received"></td>
+        <td><div class="seg" role="group" aria-label="Paid by">${["Bank","Cash"].map(m=>`<button data-act="method" data-m="${m}" aria-pressed="${method===m}" ${ro()}>${m}</button>`).join("")}</div></td>
+        <td>${method==="Cash"?`<div class="seg" role="group" aria-label="Cash status">${["Collected","Banked"].map(m=>`<button data-act="cash" data-m="${m}" aria-pressed="${(r.cash||"Collected")===m}" ${ro()}>${m}</button>`).join("")}</div>`:'<span class="sub">—</span>'}</td>
+        <td><input type="date" id="dt-${t.id}" data-f="date" value="${r.date||""}" ${ro()} aria-label="Date received"></td>
+        <td><input id="nt-${t.id}" data-f="note" value="${esc(r.note||"")}" placeholder="" style="width:120px" ${ro()} aria-label="Note"></td>
+        <td>${STATUS_CHIP[st]}${canWrite&&st!=="paid"?` <button class="btn ghost small" data-act="paidfull">Paid in full</button>`:""}</td></tr>`;}).join("")}
+    </tbody></table></div>`:`<div class="empty">No tenancies running in ${monthLabel(rentMonth)}. Add tenants on the Tenants &amp; deposits tab and their rent shows up here each month.</div>`}
+  </section>
+  <section class="block">
+    <div class="sechead"><div><h2>${yr} at a glance</h2><p class="sub">Each square is a month. Tap one to open it.</p></div>
+      <div class="legend"><span><i style="background:var(--good)"></i>Paid</span><span><i style="background:var(--warn)"></i>Part</span><span><i style="background:var(--bad)"></i>Not received</span><span><i style="background:var(--none-bg)"></i>Not due yet</span></div></div>
+    ${yrTen.length?`<div class="tablewrap" style="padding:12px"><div class="ledger"><div></div>${months.map(m=>`<div class="hd">${monthShort(m).slice(0,1)}</div>`).join("")}
+      ${yrTen.map(t=>`<div class="nm" title="${esc(t.tenantName)}">${esc(t.tenantName)}<span class="muted"> · ${esc(t.room||"")}</span></div>${months.map(m=>{ if(!tenancyActiveIn(t,m)) return `<button class="na" disabled aria-label="No tenancy"></button>`; const st=rentStatus(t,m,rentFor(t.id,m)); return `<button class="${st==="paid"?"paid":st==="part"?"part":st==="late"?"late":""} ${m===rentMonth?"cur":""}" data-act="gomonth" data-m="${m}" title="${monthLabel(m)}: ${st}" aria-label="${esc(t.tenantName)} ${monthLabel(m)} ${st}"></button>`;}).join("")}`).join("")}
+    </div></div>`:`<p class="sub">Nothing to show for ${yr} yet.</p>`}
+  </section>`;
+};
+
+VIEWS.tenants = () => {
+  const list = S.tenancies.filter(t => tenantFilter==="all" ? true : tenantFilter==="current" ? isCurrent(t) : !isCurrent(t))
+    .sort((a,b)=> ((byId("properties",a.propertyId)||{}).name||"").localeCompare((byId("properties",b.propertyId)||{}).name||"") || (a.room||"").localeCompare(b.room||"",undefined,{numeric:true}));
+  const held = S.tenancies.filter(t=>(t.depositStatus||"Held")==="Held").reduce((a,t)=>a+num(t.deposit),0);
+  const unprot = S.tenancies.filter(t=>isCurrent(t) && num(t.deposit)>0 && (t.depositScheme==="Not yet protected"||!t.depositScheme));
+  return `<section class="block">
+    <div class="sechead"><div><h2>Tenants &amp; deposits</h2><p class="sub">Deposits held right now: <b class="num">${gbp(held)}</b></p></div>
+      <div class="toolbar"><div class="seg" role="group" aria-label="Show">${[["current","Current"],["past","Moved out"],["all","All"]].map(([k,l])=>`<button data-act="tfilter" data-m="${k}" aria-pressed="${tenantFilter===k}">${l}</button>`).join("")}</div>${addBtn("tenancies","Add tenant")}</div></div>
+    ${unprot.length?`<div class="banner bad">${unprot.length} deposit${unprot.length>1?"s are":" is"} not marked as protected. In England a deposit must be protected in a government scheme within 30 days of receiving it.</div>`:""}
+    ${list.length?`<div class="tablewrap"><table><thead><tr><th>Tenant</th><th>Property · room</th><th class="n">Rent</th><th>Moved in</th><th>Ends</th><th class="n">Deposit</th><th>Scheme</th><th>Deposit status</th><th></th></tr></thead><tbody>
+      ${list.map(t=>{ const p=byId("properties",t.propertyId)||{}; const ds=t.depositStatus||"Held"; return `<tr><td><b>${esc(t.tenantName)}</b><div class="sub">${esc(t.phone||"")}</div></td><td>${esc(p.name||"—")}<div class="sub">${esc(t.room||"")}</div></td><td class="n">${gbp(t.rent)}</td><td>${fmtD(t.startDate)}</td><td>${t.endDate?fmtD(t.endDate):'<span class="sub">Rolling</span>'}</td><td class="n">${gbp(t.deposit)}</td><td>${esc(t.depositScheme||"—")}${t.depositRef?`<div class="sub">${esc(t.depositRef)}</div>`:""}</td>
+      <td>${ds==="Held"?'<span class="chip info">Held</span>':ds==="Returned in full"?'<span class="chip good">Returned</span>':`<span class="chip warn">${esc(ds)}</span>`}${t.depositReturnedDate?`<div class="sub">${fmtD(t.depositReturnedDate)}${has(t.depositReturned)?" · "+gbp(t.depositReturned):""}</div>`:""}</td>
+      <td><div class="row">${canWrite&&ds==="Held"&&num(t.deposit)>0?`<button class="btn small" data-act="depret" data-id="${t.id}">Deposit returned</button>`:""}${canWrite?`<button class="btn ghost small" data-act="edit" data-col="tenancies" data-id="${t.id}">Edit</button>`:""}</div></td></tr>`;}).join("")}
+    </tbody></table></div>`:`<div class="empty">${tenantFilter==="past"?"No past tenants yet.":"No tenants recorded yet. Add each HMO room's tenant and the family in the flat."}${tenantFilter!=="past"?addBtn("tenancies","Add tenant"):""}</div>`}
+  </section>`;
+};
+
+VIEWS.money = (T) => {
+  const groups = OWNERS();
+  const accs = S.accounts;
+  const totalFor = k => accs.filter(a=>(a.owner||"joint")===k).reduce((s,a)=>s+toGBP(a.value,a.currency),0);
+  const monthlyAll = accs.reduce((s,a)=>s+toGBP(a.monthly,a.currency),0);
+  return `<section class="block">
+    <div class="sechead"><div><h2>Investments &amp; savings</h2><p class="sub">Indian rupee accounts convert at ₹${inrRate()||"?"} = £1 (change it in Settings).</p></div>
+      <div class="toolbar">${canWrite&&accs.length?`<button class="btn" data-act="quick">${quickUpdate?"Finish updating":"Update values"}</button>`:""}${addBtn("accounts","Add account")}</div></div>
+    <div class="grid g-stats">
+      ${groups.map(([k,l])=>`<div class="stat"><span class="k">${esc(l)}</span><span class="v">${gbp(totalFor(k))}</span></div>`).join("")}
+      <div class="stat"><span class="k">Paid in each month</span><span class="v">${gbp(monthlyAll)}</span><span class="h">SIPs and regular deposits</span></div>
+    </div>
+    ${accs.length?groups.filter(([k])=>accs.some(a=>(a.owner||"joint")===k)).map(([k,l])=>{ const list=accs.filter(a=>(a.owner||"joint")===k).sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+      return `<div class="tablewrap"><table><thead><tr><th>${esc(l)}</th><th>Type</th><th class="n">Value</th><th class="n">In £</th><th class="n">Paid in</th><th class="n">Gain</th><th class="n">Monthly</th><th>As of</th><th></th></tr></thead><tbody>
+      ${list.map(a=>{ const cur=a.currency||"GBP"; const fmt=cur==="INR"?(x=>inr0.format(num(x))):(x=>gbp(x)); const gain=has(a.contributed)&&num(a.contributed)?num(a.value)-num(a.contributed):null;
+        return `<tr data-aid="${a.id}"><td><b>${esc(a.name)}</b><div class="sub">${esc(a.provider||"")}</div></td><td>${esc(a.kind||"")} ${cur==="INR"?'<span class="chip inr">INR</span>':""}</td>
+        <td class="n">${quickUpdate?`<input class="amt" id="qv-${a.id}" data-q="value" inputmode="decimal" value="${has(a.value)?a.value:""}">`:fmt(a.value)}</td><td class="n">${gbp(toGBP(a.value,cur))}</td>
+        <td class="n">${has(a.contributed)?fmt(a.contributed):"—"}</td><td class="n ${gain===null?"":gain>=0?"pos":"neg"}">${gain===null?"—":(gain>=0?"+":"")+fmt(gain)}${gain!==null?`<div class="sub">${(gain/num(a.contributed)*100).toFixed(1)}%</div>`:""}</td>
+        <td class="n">${has(a.monthly)&&num(a.monthly)?fmt(a.monthly):"—"}${a.sipDay?`<div class="sub">on the ${esc(a.sipDay)}${["","st","nd","rd"][a.sipDay%10>3||Math.floor(a.sipDay%100/10)===1?0:a.sipDay%10]||"th"}</div>`:""}</td><td>${a.asOf?fmtD(a.asOf):'<span class="chip">Not set</span>'}</td>
+        <td>${canWrite?`<button class="btn ghost small" data-act="edit" data-col="accounts" data-id="${a.id}">Edit</button>`:""}</td></tr>`;}).join("")}
+      </tbody></table></div>`;}).join(""):`<div class="empty">No accounts yet.${addBtn("accounts","Add account")}</div>`}
+  </section>
+  <section class="block">
+    <div class="sechead"><div><h2>Other borrowing</h2><p class="sub">Credit cards, loans and car finance count against net worth.</p></div>${addBtn("debts","Add loan or card")}</div>
+    ${S.debts.length?`<div class="tablewrap"><table><thead><tr><th>Name</th><th>Whose</th><th class="n">Owed</th><th class="n">Rate</th><th class="n">Monthly</th><th>Ends</th><th></th></tr></thead><tbody>
+      ${S.debts.map(d=>`<tr><td><b>${esc(d.name)}</b><div class="sub">${esc(d.kind||"")}</div></td><td>${esc(ownerName(d.owner))}</td><td class="n">${gbp(d.balance)}</td><td class="n">${pct(d.rate)}</td><td class="n">${gbp(d.monthly)}</td><td>${fmtD(d.endDate)}</td><td>${canWrite?`<button class="btn ghost small" data-act="edit" data-col="debts" data-id="${d.id}">Edit</button>`:""}</td></tr>`).join("")}
+    </tbody></table></div>`:`<p class="sub">No other borrowing recorded.</p>`}
+  </section>`;
+};
+
+VIEWS.dates = () => {
+  const cats = ["all","Property","Mortgage","Tenancy","Car","Insurance","Home","Documents","Tax","Finance","Family","Health","Other"];
+  const all = allDates();
+  const list = all.filter(d => dateFilter==="all" || d.cat===dateFilter);
+  const A = attention();
+  const present = new Set(all.map(d=>d.cat));
+  const u = undated().filter(d => dateFilter==="all" || d.cat===dateFilter);
+  // group by month for a readable timeline; overdue items go in their own group at the top
+  const groups = []; let cur = null;
+  for (const d of list) { const key = daysUntil(d.due) < 0 ? "overdue" : d.due.slice(0,7); if (!cur || cur.key !== key) { cur = {key, items:[]}; groups.push(cur); } cur.items.push(d); }
+  const yearCost = S.reminders.filter(r=>!r.done).reduce((a,r)=>a+num(r.cost),0) + S.checks.reduce((a,c)=>a+(/yearly/i.test(c.repeat||"")?num(c.cost):0),0) + S.vehicles.reduce((a,v)=>a+num(v.insurancePremium)+num(v.taxCost),0);
+  return `<section class="block">
+    <div class="sechead"><div><h2>Key dates</h2><p class="sub">Certificates, renewals, mortgage deals, tenancies, cars and documents in one timeline.</p></div>
+      <div class="toolbar">${S.vehicles.length?"":addBtn("vehicles","Add car")}${addBtn("reminders","Add renewal or date")}<button class="btn" data-act="ics">Add to my calendar</button></div></div>
+    <div class="grid g-stats">
+      <div class="stat"><span class="k">Overdue</span><span class="v ${A.over.length?"neg":""}">${A.over.length}</span></div>
+      <div class="stat"><span class="k">Act now</span><span class="v">${A.now.length}</span><span class="h">Inside their warning window</span></div>
+      <div class="stat"><span class="k">Next 90 days</span><span class="v">${A.next.length}</span></div>
+      <div class="stat"><span class="k">Missing a date</span><span class="v">${undated().length}</span></div>
+      <div class="stat"><span class="k">Renewals per year</span><span class="v">${gbp(yearCost)}</span><span class="h">Where you've entered a cost</span></div>
+    </div>
+    <div class="row">${cats.filter(c=>c==="all"||present.has(c)||undated().some(d=>d.cat===c)).map(c=>`<button class="btn small" data-act="dfilter" data-m="${c}" aria-pressed="${dateFilter===c}" style="${dateFilter===c?"border-color:var(--accent);color:var(--accent)":""}">${c==="all"?"Everything":c}</button>`).join("")}</div>
+    ${groups.length?`<div class="timeline">${groups.map(g=>`<div class="tgroup"><h3 class="tmonth ${g.key==="overdue"?"neg":""}">${g.key==="overdue"?"Overdue":monthLabel(g.key)}</h3><div class="card list">${g.items.map(d=>dateRow(d)).join("")}</div></div>`).join("")}</div>`:`<div class="empty">No dated items${dateFilter!=="all"?" in this category":""} yet.</div>`}
+  </section>
+  ${u.length?`<section class="block" id="nodate"><div class="sechead"><div><h2>Needs a date</h2><p class="sub">Add the date from the certificate, policy or document so it can remind you.</p></div></div><div class="card list">${u.map(d=>dateRow(d)).join("")}</div></section>`:""}
+  <section class="block">
+    <div class="sechead"><div><h2>Cars</h2><p class="sub">Insurer, policy and breakdown details with MOT and tax dates. Check MOT and tax dates free on GOV.UK.</p></div>${addBtn("vehicles","Add car")}</div>
+    ${S.vehicles.length?`<div class="grid g-cards">${S.vehicles.map(v=>`<article class="card"><div class="sechead"><div><h3>${esc(v.name)}</h3><div class="sub">${v.reg?`<span class="num plate">${esc(v.reg)}</span> · `:""}${esc(ownerName(v.owner))}</div></div>${canWrite?`<button class="btn small" data-act="edit" data-col="vehicles" data-id="${v.id}">Edit</button>`:""}</div>
+      <div class="kv">
+        <div><span class="k">Insured with</span><span class="v">${esc(v.insurer||"—")}</span></div>
+        <div><span class="k">Policy number</span><span class="v">${esc(v.policyNo||"—")}</span></div>
+        <div><span class="k">Premium</span><span class="v">${has(v.insurancePremium)?gbp(v.insurancePremium):"—"}</span></div>
+        <div><span class="k">Claims phone</span><span class="v">${esc(v.insurerPhone||"—")}</span></div>
+        <div><span class="k">Breakdown</span><span class="v">${esc(v.breakdownProvider||"—")}${v.breakdownRef?` · ${esc(v.breakdownRef)}`:""}</span></div>
+        <div><span class="k">Finance left</span><span class="v">${has(v.financeOwed)&&num(v.financeOwed)?gbp(v.financeOwed):"—"}</span></div>
+      </div>
+      <div class="list">${VF.map(([k,l])=>`<div class="li"><div class="t">${l}<div class="m">${v[k]?fmtD(v[k]):"Add the date"}</div></div>${v[k]?dueChip(v[k]):'<span class="chip">No date</span>'}</div>`).join("")}</div></article>`).join("")}</div>`:`<div class="empty">No cars added yet. Add each car with its insurer and policy number, and the MOT and tax dates.${addBtn("vehicles","Add car")}</div>`}
+  </section>`;
+};
+function buildICS() {
+  const pad = n => String(n).padStart(2,"0");
+  const ymd = s => s.replace(/-/g,"");
+  const nextDay = s => { const d = parseD(s); d.setDate(d.getDate()+1); return iso(d).replace(/-/g,""); };
+  const escI = s => String(s||"").replace(/\\/g,"\\\\").replace(/[,;]/g,m=>"\\"+m).replace(/\n/g,"\\n");
+  const now = new Date(); const stamp = `${now.getUTCFullYear()}${pad(now.getUTCMonth()+1)}${pad(now.getUTCDate())}T${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}00Z`;
+  const lines = ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Household Ledger//EN","CALSCALE:GREGORIAN","X-WR-CALNAME:Household Ledger"];
+  for (const d of allDates()) {
+    if (daysUntil(d.due) < -30) continue;
+    const desc = [d.where, d.provider, d.ref?`Ref ${d.ref}`:"", d.contact].filter(Boolean).join(" · ");
+    lines.push("BEGIN:VEVENT", `UID:hl-${d.col}-${d.id}-${d.vfield||"x"}@household-ledger`, `DTSTAMP:${stamp}`, `DTSTART;VALUE=DATE:${ymd(d.due)}`, `DTEND;VALUE=DATE:${nextDay(d.due)}`,
+      `SUMMARY:${escI(d.title + (d.where?` (${d.where})`:""))}`, `DESCRIPTION:${escI(desc)}`,
+      "BEGIN:VALARM","ACTION:DISPLAY",`DESCRIPTION:${escI(d.title)}`,`TRIGGER:-P${Math.max(1,Math.round(d.soon||30))}D`,"END:VALARM",
+      "BEGIN:VALARM","ACTION:DISPLAY",`DESCRIPTION:${escI(d.title)}`,"TRIGGER:-P1D","END:VALARM","END:VEVENT");
+  }
+  lines.push("END:VCALENDAR");
+  return lines.join("\r\n");
+}
+async function exportICS() {
+  const n = allDates().length;
+  if (!n) { toast("Add some dates first"); return; }
+  if (!dlNS) { toast("Downloads aren't available in this view"); return; }
+  try { await dlNS.save({ filename: `household-dates-${todayISO()}.ics`, data: buildICS() }); toast(`${n} dates saved. Open the file to add them to your calendar.`); }
+  catch (e) { if (e && e.code === "declined") return; toast("Couldn't save the calendar file"); console.error(e); }
+}
+
+VIEWS.settings = () => {
+  const n = names();
+  return `<section class="block">
+    <h2>Settings</h2>
+    <div class="card"><form id="settingsForm" class="fgroup">
+      <div class="field"><label for="s-p1">Your name</label><input id="s-p1" value="${esc(S.settings.p1||"")}" placeholder="Me" ${ro()}></div>
+      <div class="field"><label for="s-p2">Partner</label><input id="s-p2" value="${esc(S.settings.p2||"Shalini")}" ${ro()}></div>
+      <div class="field"><label for="s-child">Son</label><input id="s-child" value="${esc(S.settings.child||"Arjun")}" ${ro()}></div>
+      <div class="field"><label for="s-inr">Rupees per £1</label><input id="s-inr" inputmode="decimal" value="${esc(S.settings.inrPerGbp||"")}" ${ro()}><span class="hint">Used to convert Indian accounts. Check today's rate and update now and then.</span></div>
+      ${canWrite?`<div class="field" style="align-self:end"><button class="btn primary" type="submit">Save settings</button></div>`:""}
+    </form></div>
+    <div class="card"><h3>Who can see and edit this</h3>
+      ${window.HL_SITE
+        ? `<p class="sub" style="max-width:65ch">Signed in as <b>${esc(window.HL_SITE.email||"")}</b>. Only the email addresses listed in your Firebase security rules can read or change anything here. Logins and passwords are managed in the Firebase console under Authentication.</p><div><button class="btn" data-act="signout">Sign out</button></div>`
+        : `<p class="sub" style="max-width:65ch">Only people you share this page with can open it, and they sign in with their own Claude account. To let ${esc(n.p2)} add rent and update figures, use the Share button on this page and invite her email address as an <b>Editor</b>. Don't turn on a public link: anyone with that link could then try to open it, and editing by invited people switches off while a link is on.</p>`}</div>
+    <div class="card"><h3>Backup</h3><p class="sub">Download everything as a file you can keep. Do this every month or so.</p><div><button class="btn" data-act="backup">Download backup (.json)</button></div></div>
+    ${canWrite?`<div class="card"><h3>Restore from a backup</h3><p class="sub" style="max-width:65ch">Bring in a backup file, for example one downloaded from the earlier version of this page. Records in the file replace ones with the same name here; nothing else is deleted.</p>
+      <div class="row"><input type="file" id="importFile" accept=".json,application/json" class="input"></div>
+      ${pendingImport?`<div class="banner">This file holds <b>${pendingImport.count} records</b>${pendingImport.exportedAt?` saved on ${fmtD(pendingImport.exportedAt.slice(0,10))}`:""}. <button class="btn primary small" data-act="doimport" ${importing?"disabled":""}>${importing?"Restoring…":`Restore ${pendingImport.count} records`}</button> <button class="btn ghost small" data-act="cancelimport">Cancel</button></div>`:""}</div>`:""}
+  </section>`;
+};
+
+// ---------- modal form ----------
+function openForm(col, id, preset={}) {
+  const sc = SCHEMA[col]; const rec = id ? byId(col, id) || {} : {...preset};
+  const isNew = !id;
+  let html = "", inGroup = false;
+  const field = f => {
+    const v = rec[f.k] ?? "";
+    const idA = `f-${f.k}`;
+    let input;
+    if (f.t === "select") { const opts = typeof f.o === "function" ? f.o() : f.o; input = `<select id="${idA}" name="${f.k}">${opts.map(o=>{ const [val,lab]=Array.isArray(o)?o:[o,o]; return `<option value="${esc(val)}" ${String(v)===String(val)?"selected":""}>${esc(lab)}</option>`; }).join("")}</select>`; }
+    else if (f.t === "textarea") input = `<textarea id="${idA}" name="${f.k}" placeholder="${esc(f.ph||"")}">${esc(v)}</textarea>`;
+    else { const type = f.t==="date"?"date":f.t==="month"?"month":"text"; const im = ["money","pct","number"].includes(f.t)?' inputmode="decimal"':""; input = `<input id="${idA}" name="${f.k}" type="${type}"${im} value="${esc(v)}" placeholder="${esc(f.ph||"")}" ${f.list?`list="${f.list}"`:""} ${f.req?"required":""}>`; }
+    return `<div class="field ${f.wide?"wide":""}"><label for="${idA}">${esc(f.l)}</label>${input}${f.hint?`<span class="hint">${esc(f.hint)}</span>`:""}</div>`;
+  };
+  for (const f of sc.fields) {
+    if (f.h) { if (inGroup) html += `</div>`; html += `<div class="fgroup"><h4>${esc(f.h)}</h4>`; inGroup = true; continue; }
+    if (!inGroup) { html += `<div class="fgroup">`; inGroup = true; }
+    html += field(f);
+  }
+  if (inGroup) html += `</div>`;
+  $("#modalRoot").innerHTML = `<div class="scrim" id="scrim"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+    <header><h2 id="mTitle">${isNew?"Add":"Edit"} ${sc.title}</h2><button class="btn ghost" data-act="close" aria-label="Close">✕</button></header>
+    <form id="recForm" novalidate>${html}${datalists()}</form>
+    <footer><div>${!isNew?`<button class="btn danger" data-act="del" data-col="${col}" data-id="${id}">Delete</button>`:""}</div><div class="row"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="submit">${isNew?"Add":"Save"}</button></div></footer>
+  </div></div>`;
+  const form = $("#recForm");
+  form.dataset.col = col; form.dataset.id = id || "";
+  setTimeout(()=>{ const first=form.querySelector("input,select,textarea"); first && first.focus(); },30);
+}
+function closeModal(){ $("#modalRoot").innerHTML = ""; if (renderQueued) render(); }
+async function submitForm() {
+  const form = $("#recForm"); if (!form) return;
+  const col = form.dataset.col, id = form.dataset.id;
+  const sc = SCHEMA[col]; const prev = id ? byId(col,id) || {} : {};
+  const data = {...prev}; delete data.id;
+  for (const f of sc.fields) { if (!f.k) continue; const el = form.elements[f.k]; if (!el) continue; let v = el.value.trim();
+    if (["money","pct","number"].includes(f.t)) v = v === "" ? "" : num(v);
+    data[f.k] = v; }
+  const req = sc.fields.find(f => f.req && !has(data[f.k]));
+  if (req) { const el = form.elements[req.k]; el.focus(); el.setCustomValidity("Required"); el.reportValidity?.(); toast(`Add ${req.l.toLowerCase()} first`); return; }
+  let newId = id;
+  if (!id) newId = db.collection(col).doc().id;
+  // new HMO/let: add standard checks
+  const ok = await save(col, newId, data);
+  if (!ok) return;
+  if (col === "properties" && !id) await seedChecks(newId, data.kind);
+  closeModal(); toast(id ? "Saved" : "Added");
+}
+const CHECKS = {
+  "HMO":[["Gas safety certificate (CP12)","Yearly"],["Boiler service","Yearly"],["Electrical safety report (EICR)","5 years"],["Energy performance certificate (EPC)","10 years"],["HMO licence renewal","5 years"],["Fire risk assessment","Yearly"],["Fire alarm test (weekly)","Weekly"],["Fire alarm & emergency lighting service","6 months"],["Fire extinguishers / blankets check","Yearly"],["PAT testing (landlord appliances)","Yearly"],["Legionella risk assessment","2 years"],["Landlord insurance renewal","Yearly"]],
+  "Single let":[["Gas safety certificate (CP12)","Yearly"],["Boiler service","Yearly"],["Electrical safety report (EICR)","5 years"],["Energy performance certificate (EPC)","10 years"],["Smoke & CO alarm check","Yearly"],["Legionella risk assessment","2 years"],["Landlord insurance renewal","Yearly"]],
+  "Home (where we live)":[["Home insurance renewal","Yearly"],["Boiler service","Yearly"],["Boiler cover / HomeCare renewal","Yearly"]]
+};
+async function seedChecks(pid, kind) {
+  const list = CHECKS[kind] || CHECKS["Single let"];
+  for (const [label, repeat] of list) await save("checks", null, {propertyId:pid, label, repeat, due:"", lastDone:""});
+}
+
+// ---------- events ----------
+document.addEventListener("click", async (e) => {
+  const tb = e.target.closest("#tabs button"); if (tb) { setTab(tb.dataset.tab); return; }
+  const tg = e.target.closest("[data-tabgo]"); if (tg) { setTab(tg.dataset.tabgo); return; }
+  if (e.target.id === "scrim") { closeModal(); return; }
+  const b = e.target.closest("[data-act]"); if (!b) return;
+  const act = b.dataset.act; e.preventDefault();
+  if (act === "close") return closeModal();
+  if (act === "submit") return submitForm();
+  if (act === "new") { const preset = {}; if (b.dataset.prop) preset.propertyId = b.dataset.prop; if (b.dataset.col==="tenancies") { preset.status="Current"; preset.depositStatus="Held"; preset.rentDay=1; } if (b.dataset.col==="accounts") { preset.currency="GBP"; preset.asOf=todayISO(); } if (b.dataset.col==="checks"||b.dataset.col==="reminders") preset.repeat = "Yearly"; return openForm(b.dataset.col, null, preset); }
+  if (act === "edit") return openForm(b.dataset.col, b.dataset.id);
+  if (act === "del") { if (b.dataset.armed) { const ok = await remove(b.dataset.col, b.dataset.id); if (ok) { if (b.dataset.col==="properties") for (const c of S.checks.filter(c=>c.propertyId===b.dataset.id)) await remove("checks", c.id); closeModal(); toast("Deleted"); } } else { b.dataset.armed = "1"; b.textContent = "Tap again to delete"; } return; }
+  if (act === "done") return markDone(b.dataset.col, b.dataset.id, b.dataset.vfield);
+  if (act === "month") { rentMonth = addMonths(rentMonth, +b.dataset.d); return render(); }
+  if (act === "gomonth") { rentMonth = b.dataset.m; render(); window.scrollTo({top:0}); return; }
+  if (act === "method" || act === "cash" || act === "paidfull") { const tr = b.closest("tr"); return saveRentRow(tr.dataset.tid, act, b.dataset.m); }
+  if (act === "tfilter") { tenantFilter = b.dataset.m; return render(); }
+  if (act === "dfilter") { dateFilter = b.dataset.m; return render(); }
+  if (act === "depret") { const t = byId("tenancies", b.dataset.id); return openForm("tenancies", t.id), setTimeout(()=>{ const f=$("#recForm"); if(!f) return; f.elements.depositStatus.value="Returned in full"; if(!f.elements.depositReturned.value) f.elements.depositReturned.value = t.deposit ?? ""; if(!f.elements.depositReturnedDate.value) f.elements.depositReturnedDate.value = todayISO(); f.elements.depositReturned.focus(); },40); }
+  if (act === "quick") { quickUpdate = !quickUpdate; return render(); }
+  if (act === "snapshot") { const T = totals(); const mk = monthKey(new Date()); if (await save("snapshots", mk, {net:Math.round(T.net), assets:Math.round(T.assets), liabilities:Math.round(T.liab), propertyEquity:Math.round(T.homeEq+T.rentalEq), investments:Math.round(T.inv+T.pens+T.cashS)})) toast(`Snapshot saved for ${monthLabel(mk)}`); return; }
+  if (act === "backup") return backup();
+  if (act === "ics") return exportICS();
+  if (act === "signout") { if (window.HL_SITE && window.HL_SITE.signOut) window.HL_SITE.signOut(); return; }
+  if (act === "cancelimport") { pendingImport = null; return render(); }
+  if (act === "doimport") return runImport();
+  if (act === "gonodate") { dateFilter = "all"; setTab("dates"); setTimeout(()=>{ const el = document.getElementById("nodate"); el && el.scrollIntoView({block:"start"}); }, 60); return; }
+  if (act === "bmonth") { budgetMonth = b.dataset.m; return render(); }
+  if (act === "byear") { budgetMonth = addMonths(budgetMonth, 12*(+b.dataset.d)); return render(); }
+  if (act === "rentbasis") { rentBasis = b.dataset.m; try{localStorage.setItem("hl.rentBasis",rentBasis);}catch(e){} return render(); }
+  if (act === "gorent") { rentMonth = b.dataset.m; return setTab("rent"); }
+  if (act === "ooadd") {
+    const label = $("#oo-label").value.trim(), amount = num($("#oo-amt").value);
+    if (!label || !amount) { toast("Add what it was and the amount"); (label?$("#oo-amt"):$("#oo-label")).focus(); return; }
+    const item = { id: Date.now().toString(36), label, amount, kind: $("#oo-kind").value, date: $("#oo-date").value };
+    const cur = (S.months.find(m=>m.id===budgetMonth)||{}).oneoffs || [];
+    $("#oo-label").value = ""; $("#oo-amt").value = ""; b.focus();
+    if (await saveMonth(budgetMonth, { oneoffs: [...cur, item] })) toast(`Added ${label}`);
+    return;
+  }
+  if (act === "oodel") { const cur = (S.months.find(m=>m.id===budgetMonth)||{}).oneoffs || []; await saveMonth(budgetMonth, { oneoffs: cur.filter(o=>o.id!==b.dataset.oid) }); toast("Removed"); return; }
+});
+document.addEventListener("change", async (e) => {
+  const el = e.target;
+  if (el.id === "rentMonth" && el.value) { rentMonth = el.value; el.blur(); return render(); }
+  if (el.id === "rentProp") { rentProp = el.value; el.blur(); return render(); }
+  if (el.dataset.f) { const tr = el.closest("tr"); return saveRentRow(tr.dataset.tid, "field"); }
+  if (el.dataset.bl) {
+    const l = byId("budget", el.dataset.bl); if (!l) return;
+    const ov = {...((S.months.find(m=>m.id===budgetMonth)||{}).overrides || {})};
+    const v = el.value.trim();
+    if (v === "" || num(v) === num(l.amount)) delete ov[l.id]; else ov[l.id] = num(v);
+    await saveMonth(budgetMonth, { overrides: ov }); return;
+  }
+  if (el.id === "importFile" && el.files && el.files[0]) {
+    try {
+      const data = JSON.parse(await el.files[0].text());
+      const count = COLS.reduce((a,c)=>a+(Array.isArray(data[c])?data[c].length:0),0) + (data.settings && Object.keys(data.settings).length ? 1 : 0);
+      if (!count) throw new Error("empty");
+      pendingImport = { data, count, exportedAt: data.exportedAt || "" };
+    } catch (err) { pendingImport = null; toast("That file isn't a Household Ledger backup"); }
+    el.value = ""; el.blur(); return render();
+  }
+  if (el.id === "monthNotes") { await saveMonth(budgetMonth, { notes: el.value }); toast("Notes saved"); return; }
+  if (el.dataset.q) { const tr = el.closest("tr"); const a = byId("accounts", tr.dataset.aid); if (!a) return; const v = el.value.trim(); await patch("accounts", a.id, {value: v===""?"":num(v), asOf: todayISO()}); toast(`${a.name} updated`); }
+});
+document.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (e.target.id === "settingsForm") { const ok = await save("settings","main",{...S.settings, p1:$("#s-p1").value.trim(), p2:$("#s-p2").value.trim(), child:$("#s-child").value.trim(), inrPerGbp: num($("#s-inr").value)||""}); if (ok) toast("Settings saved"); }
+  if (e.target.id === "recForm") submitForm();
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape" && $("#scrim")) closeModal(); });
+
+function setTab(t){ tab = t; try{localStorage.setItem("hl.tab",t);}catch(e){} quickUpdate=false; render(); window.scrollTo({top:0}); }
+
+async function saveRentRow(tid, act, m) {
+  const t = byId("tenancies", tid); if (!t) return;
+  const tr = document.querySelector(`tr[data-tid="${tid}"]`);
+  const prev = rentFor(tid, rentMonth) || {};
+  const get = f => tr ? tr.querySelector(`[data-f="${f}"]`).value.trim() : "";
+  const d = { tenancyId: tid, propertyId: t.propertyId, month: rentMonth,
+    due: get("due")===""?num(t.rent):num(get("due")), received: get("received")===""?"":num(get("received")),
+    method: prev.method || (t.payMethod==="Cash"?"Cash":"Bank"), cash: prev.cash || "Collected", date: get("date"), note: get("note") };
+  if (act === "method") d.method = m;
+  if (act === "cash") { d.cash = m; if (m==="Banked") d.bankedOn = todayISO(); }
+  if (act === "paidfull") { d.received = d.due; if (!d.date) d.date = todayISO(); }
+  if (act === "field" && d.received !== "" && !d.date && !prev.date) d.date = todayISO();
+  const ok = await save("rent", rentDocId(tid, rentMonth), d);
+  if (ok && act==="paidfull") toast(`${t.tenantName}: ${gbp(d.received)} received`);
+  render();
+}
+async function markDone(col, id, vfield) {
+  const r = byId(col, id); if (!r) return;
+  if (col === "checks") { const next = rollDate(todayISO(), r.repeat); await patch(col, id, {lastDone: todayISO(), due: next}); toast(next?`Next due ${fmtD(next)}`:"Marked done"); }
+  else if (col === "reminders") { if (r.repeat && REPEAT[r.repeat]) { const next = rollDate(r.due || todayISO(), r.repeat); await patch(col, id, {due: next, lastDone: todayISO()}); toast(`Next due ${fmtD(next)}`); } else { await patch(col, id, {done: true, lastDone: todayISO()}); toast("Done"); } }
+  else if (col === "vehicles" && vfield) { const base = r[vfield] || todayISO(); const d = parseD(base); d.setFullYear(d.getFullYear()+1); await patch(col, id, {[vfield]: iso(d)}); toast(`Next due ${fmtD(iso(d))}`); }
+}
+let pendingImport = null, importing = false;
+async function runImport() {
+  if (!pendingImport || importing) return;
+  importing = true; render();
+  const { data } = pendingImport; let done = 0, failed = 0;
+  const strip = r => { const o = {...r}; delete o.id; return o; };
+  try {
+    if (data.settings && Object.keys(data.settings).length) { const s = strip(data.settings); if (await save("settings", "main", s)) done++; else failed++; }
+    for (const c of COLS) {
+      const rows = Array.isArray(data[c]) ? data[c] : [];
+      for (const r of rows) {
+        if (!r || !r.id) { failed++; continue; }
+        if (await save(c, String(r.id), strip(r))) done++; else failed++;
+        if (done % 10 === 0) toast(`Restored ${done} of ${pendingImport.count}…`);
+      }
+    }
+  } finally { importing = false; pendingImport = null; }
+  toast(failed ? `Restored ${done} records, ${failed} couldn't be saved` : `Restored ${done} records`);
+  render();
+}
+async function backup() {
+  const data = { exportedAt: new Date().toISOString(), settings: S.settings, ...Object.fromEntries(COLS.map(c=>[c,S[c]])) };
+  const text = JSON.stringify(data, null, 2);
+  if (!dlNS) { toast("Downloads aren't available in this view"); return; }
+  try { await dlNS.save({ filename: `household-ledger-${todayISO()}.json`, data: text }); toast("Backup saved"); }
+  catch (e) { if (e && e.code === "declined") return; toast("Couldn't save the backup"); }
+}
+
+// ---------- boot ----------
+draw();
+(async () => {
+  if (!window.claude || !window.claude.use) { connMsg = `<div class="empty">Open this page in Claude to see your figures.</div>`; render(); return; }
+  const [dbNS, userNS, dl] = await Promise.all([claude.use("db"), claude.use("user"), claude.use("downloads")]);
+  dlNS = dl;
+  if (!dbNS) { connMsg = `<div class="empty">Sign in to Claude with an account this page has been shared with to see the figures.</div>`; render(); return; }
+  db = dbNS;
+  if (userNS) { try { const c = await userNS.can("data.write"); if (c === false) canWrite = false; } catch(e){} }
+  const onErr = e => { if (e && e.code === "revoked") { db = null; connMsg = `<div class="empty">Access to this page has changed. Reload to continue.</div>`; render(); } };
+  for (const c of COLS) {
+    db.collection(c).onSnapshot(snap => { S[c] = snap.docs.map(d => ({id:d.id, ...d.data()})); S.loaded[c] = true; render(); }, onErr);
+  }
+  db.doc("settings/main").onSnapshot(snap => { S.settings = snap.exists ? {...snap.data()} : {}; render(); }, onErr);
+  render();
+})();
+})();
+</script>
+</body>
+</html>

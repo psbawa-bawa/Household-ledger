@@ -1,0 +1,17 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Only these two signed-in accounts can read or change anything.
+    // Use lower-case email addresses, exactly as they appear in Firebase → Authentication → Users.
+    function isFamily() {
+      return request.auth != null
+        && request.auth.token.email in [
+          'psbawa@gmail.com',
+          'shaliniashri@gmail.com'
+        ];
+    }
+    match /{document=**} {
+      allow read, write: if isFamily();
+    }
+  }
+}
