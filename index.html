@@ -175,6 +175,8 @@ tr.grp td{background:var(--sunk);font-weight:600;font-size:12px;text-transform:u
 .btn.mic.on{background:var(--bad);color:#fff;border-color:var(--bad)}
 @media (prefers-reduced-motion:no-preference){.btn.mic.on{animation:pulse 1.2s infinite}@keyframes pulse{50%{opacity:.7}}}
 main{padding-bottom:96px}
+.oo-form{background:var(--t5);border-color:transparent}
+.oo-form .field input,.oo-form .field select{background:var(--surface)}
 .modal.wide{width:min(1060px,100%)}
 .impsec{border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;display:flex;flex-direction:column;gap:8px}
 .impsec summary{cursor:pointer;padding:2px 0}
@@ -1131,6 +1133,59 @@ function budgetFor(mk) {
   const any = income || fixed || mortT || oneoffs.length;
   return { md, ov, amt, inc, out, rentRows, morts, loans, oneoffs, salaries, rent, income, fixed, mortT, disposable, oneOut, oneIn, left, any, useExpected, future };
 }
+const OO_CATS = ["Repairs & maintenance","Furnishing & appliances","Cleaning & gardening","Utilities","Insurance","Council tax & licences","Letting agent & legal fees","Accountant & professional fees","Car & transport","Groceries","Household","Eating out","Holidays & travel","Children & school","Medical & health","Gifts & occasions","Clothing","Shopping","Tax payment","Charity","Refund","Bonus","Other"];
+function ooForm(pfx, o, actions) {
+  const catList = OO_CATS.includes(o.cat||"") || !o.cat ? OO_CATS : [o.cat, ...OO_CATS];
+  return `<div class="card oo-form" id="${pfx}-form">
+    <div class="fgroup">
+      <div class="field"><label for="${pfx}-label">What was it</label><input id="${pfx}-label" value="${esc(o.label||"")}" placeholder="e.g. Boiler repair"></div>
+      <div class="field"><label for="${pfx}-cat">Category</label><select id="${pfx}-cat"><option value="">Choose…</option>${catList.map(c=>`<option ${c===(o.cat||"")?"selected":""}>${esc(c)}</option>`).join("")}</select></div>
+      <div class="field"><label for="${pfx}-prop">Property</label><select id="${pfx}-prop"><option value="">Not property-related</option>${S.properties.map(p=>`<option value="${p.id}" ${p.id===o.propertyId?"selected":""}>${esc(p.name)}</option>`).join("")}</select></div>
+      <div class="field"><label for="${pfx}-date">Date paid</label><input type="date" id="${pfx}-date" value="${o.date||todayISO()}"></div>
+      <div class="field"><label for="${pfx}-method">Paid by</label><select id="${pfx}-method">${["Bank","Cash","Card"].map(m=>`<option ${m===(o.method||"Bank")?"selected":""}>${m}</option>`).join("")}</select></div>
+      <div class="field"><label for="${pfx}-kind">Money in or out</label><select id="${pfx}-kind"><option value="out" ${o.kind!=="in"?"selected":""}>Money out</option><option value="in" ${o.kind==="in"?"selected":""}>Money in</option></select></div>
+      <div class="field"><label for="${pfx}-amt">Amount (£)</label><input id="${pfx}-amt" inputmode="decimal" value="${has(o.amount)?o.amount:""}" placeholder="0.00"></div>
+      <div class="field wide"><label for="${pfx}-reason">Reason / notes</label><input id="${pfx}-reason" value="${esc(o.reason||"")}" placeholder="e.g. Room 3 radiator leaking, paid the plumber"></div>
+    </div>
+    <div class="row" style="justify-content:flex-end">${actions}</div>
+  </div>`;
+}
+function ooCatFrom(group, text) {
+  const t = (String(group||"") + " " + String(text||"")).toLowerCase();
+  const map = [[/repair|plumb|boiler|electrician|screwfix|toolstation|wickes|b&q|maintenance/,"Repairs & maintenance"],[/furnish|sofa|bed|ikea|dfs|appliance|fridge|washing/,"Furnishing & appliances"],[/clean|garden/,"Cleaning & gardening"],[/utilit|gas|electric|water|energy/,"Utilities"],[/insurance/,"Insurance"],[/council|licen/,"Council tax & licences"],[/agent|solicitor|legal/,"Letting agent & legal fees"],[/accountant/,"Accountant & professional fees"],[/car|petrol|fuel|shell|parking|mot/,"Car & transport"],[/grocer|tesco|sainsbury|asda|aldi|lidl|morrisons|waitrose/,"Groceries"],[/holiday|travel|flight|hotel/,"Holidays & travel"],[/school|children|nursery/,"Children & school"],[/medic|dentist|pharmac|health/,"Medical & health"],[/gift|birthday/,"Gifts & occasions"],[/restaurant|eating|takeaway|deliveroo|just eat/,"Eating out"],[/shopping|amazon|argos|ebay/,"Shopping"],[/hmrc|tax/,"Tax payment"],[/refund/,"Refund"],[/bonus/,"Bonus"]];
+  for (const [re,c] of map) if (re.test(t)) return c;
+  return "";
+}
+function ooRead(pfx) {
+  const v = id => ($("#"+pfx+"-"+id) || {}).value || "";
+  return { label: v("label").trim(), cat: v("cat"), propertyId: v("prop"), date: v("date") || todayISO(), method: v("method"), kind: v("kind"), amount: num(v("amt")), reason: v("reason").trim() };
+}
+function ooCatSummary(oo) {
+  const out = oo.filter(o => o.kind !== "in"); if (!out.length) return "";
+  const by = {}; for (const o of out) by[o.cat || "Uncategorised"] = (by[o.cat || "Uncategorised"] || 0) + num(o.amount);
+  const tot = out.reduce((a,o)=>a+num(o.amount),0);
+  const cash = out.filter(o=>o.method==="Cash").reduce((a,o)=>a+num(o.amount),0);
+  const cols = ["var(--t1k)","var(--t2k)","var(--t3k)","var(--t4k)","var(--t5k)","var(--t6k)"];
+  const list = Object.entries(by).sort((a,b)=>b[1]-a[1]);
+  return `<div class="card" style="gap:8px"><div class="sechead"><h3>Where the one-offs went</h3><span class="sub">${gbp(tot)} out · bank ${gbp(tot-cash)} · cash ${gbp(cash)}</span></div>
+    <div class="bar" style="height:14px">${list.map(([c,v],i)=>`<i style="width:${(v/tot*100).toFixed(2)}%;background:${cols[i%cols.length]}" title="${esc(c)}: ${gbp(v)}"></i>`).join("")}</div>
+    <div class="legend">${list.map(([c,v],i)=>`<span><i style="background:${cols[i%cols.length]}"></i>${esc(c)} <b class="num">${gbp(v)}</b></span>`).join("")}</div></div>`;
+}
+async function ooPut(item, oldMonth) {
+  const newMonth = item.date.slice(0,7);
+  if (oldMonth && oldMonth !== newMonth) {
+    const old = (S.months.find(m=>m.id===oldMonth)||{}).oneoffs || [];
+    await saveMonth(oldMonth, { oneoffs: old.filter(o => o.id !== item.id) });
+  }
+  const cur = ((S.months.find(m=>m.id===newMonth)||{}).oneoffs || []).filter(o => o.id !== item.id);
+  return saveMonth(newMonth, { oneoffs: [...cur, item] });
+}
+function ooEditOpen(oid) {
+  const o = ((S.months.find(m=>m.id===budgetMonth)||{}).oneoffs || []).find(x => x.id === oid); if (!o) return;
+  $("#modalRoot").innerHTML = `<div class="scrim" id="scrim"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="ooT">
+    <header><h2 id="ooT">Edit one-off</h2><button class="btn ghost" data-act="close" aria-label="Close">✕</button></header>
+    <div style="padding:16px 18px">${ooForm("ooE", o, `<button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="oosave" data-oid="${esc(o.id)}">Save</button>`)}</div></div></div>`;
+}
 VIEWS.budget = () => {
   const mk = budgetMonth, yr = mk.slice(0,4);
   const B = budgetFor(mk);
@@ -1177,10 +1232,17 @@ VIEWS.budget = () => {
   </section>
   <section class="block">
     <div class="sechead"><div><h2>One-offs in ${monthShort(mk)}</h2><p class="sub">Spends that aren't regular: repairs, holidays, school trips, a new boiler. Money that comes in once (a refund, a bonus) goes here too.</p></div></div>
-    <div class="tablewrap"><table><thead><tr><th>What</th><th>Date</th><th>Type</th><th class="n">Amount</th><th></th></tr></thead><tbody>
-      ${oo.map(o=>`<tr><td><b>${esc(o.label)}</b>${o.cat?`<div class="sub">${esc(o.cat)}</div>`:""}</td><td>${fmtD(o.date)}</td><td>${o.kind==="in"?'<span class="chip good">Money in</span>':'<span class="chip">Money out</span>'}</td><td class="n num ${o.kind==="in"?"pos":""}">${o.kind==="in"?"+":""}${gbp(o.amount,1)}</td><td>${canWrite?`<button class="btn ghost small danger" data-act="oodel" data-oid="${esc(o.id)}">Remove</button>`:""}</td></tr>`).join("")}
-      ${canWrite?`<tr><td><input id="oo-label" placeholder="e.g. HMO boiler repair" style="width:100%;min-width:140px" list="ooCats"></td><td><input type="date" id="oo-date" value="${mk===nowK?todayISO():mk+"-01"}"></td><td><select id="oo-kind"><option value="out">Money out</option><option value="in">Money in</option></select></td><td class="n"><input class="amt" id="oo-amt" inputmode="decimal" placeholder="0.00"></td><td><button class="btn primary small" data-act="ooadd">Add</button></td></tr>`:""}
-    </tbody>${oo.length?`<tfoot><tr><td colspan="3">Net one-offs</td><td class="n">${gbp(B.oneIn-B.oneOut,1)}</td><td></td></tr></tfoot>`:""}</table></div>
+    ${canWrite ? ooForm("ooN", {date: mk===nowK?todayISO():mk+"-01", kind:"out", method:"Bank"}, `<button class="btn primary" data-act="ooadd">Add one-off</button>`) : ""}
+    ${oo.length ? ooCatSummary(oo) : ""}
+    ${oo.length ? `<div class="tablewrap"><table><thead><tr><th>Date paid</th><th>What &amp; why</th><th>Category</th><th>Property</th><th>Paid by</th><th class="n">Amount</th><th></th></tr></thead><tbody>
+      ${oo.map(o=>`<tr><td class="num" style="white-space:nowrap">${fmtD(o.date)}</td>
+        <td><b>${esc(o.label)}</b>${o.reason?`<div class="sub">${esc(o.reason)}</div>`:""}</td>
+        <td>${o.cat?`<span class="chip">${esc(o.cat)}</span>`:'<span class="muted">—</span>'}</td>
+        <td>${o.propertyId?esc((byId("properties",o.propertyId)||{}).name||""):'<span class="muted">—</span>'}</td>
+        <td>${o.method?`<span class="chip ${o.method==="Cash"?"warn":"info"}">${esc(o.method)}</span>`:'<span class="muted">—</span>'}</td>
+        <td class="n num ${o.kind==="in"?"pos":""}">${o.kind==="in"?"+":""}${gbp(o.amount,1)}</td>
+        <td style="white-space:nowrap">${canWrite?`<button class="btn ghost small" data-act="ooedit" data-oid="${esc(o.id)}">Edit</button><button class="btn ghost small danger" data-act="oodel" data-oid="${esc(o.id)}">Remove</button>`:""}</td></tr>`).join("")}
+    </tbody><tfoot><tr><td colspan="5">Net one-offs</td><td class="n">${gbp(B.oneIn-B.oneOut,1)}</td><td></td></tr></tfoot></table></div>` : `<p class="sub">No one-offs recorded for ${monthLabel(mk)}.</p>`}
     <div class="field"><label for="monthNotes">Notes for ${monthLabel(mk)}</label><textarea class="input" id="monthNotes" rows="2" ${ro()} placeholder="Anything to remember about this month">${esc(B.md.notes||"")}</textarea></div>
   </section>`;
 };
@@ -1609,12 +1671,17 @@ document.addEventListener("click", async (e) => {
   if (act === "rentbasis") { rentBasis = b.dataset.m; try{localStorage.setItem("hl.rentBasis",rentBasis);}catch(e){} return render(); }
   if (act === "gorent") { rentMonth = b.dataset.m; return setTab("rent"); }
   if (act === "ooadd") {
-    const label = $("#oo-label").value.trim(), amount = num($("#oo-amt").value);
-    if (!label || !amount) { toast("Add what it was and the amount"); (label?$("#oo-amt"):$("#oo-label")).focus(); return; }
-    const item = { id: Date.now().toString(36), label, amount, kind: $("#oo-kind").value, date: $("#oo-date").value };
-    const cur = (S.months.find(m=>m.id===budgetMonth)||{}).oneoffs || [];
-    $("#oo-label").value = ""; $("#oo-amt").value = ""; b.focus();
-    if (await saveMonth(budgetMonth, { oneoffs: [...cur, item] })) toast(`Added ${label}`);
+    const it = ooRead("ooN");
+    if (!it.label || !it.amount) { toast("Add what it was and the amount"); (it.label?$("#ooN-amt"):$("#ooN-label")).focus(); return; }
+    const item = { id: Date.now().toString(36), ...it };
+    if (await ooPut(item)) { toast(`Added ${it.label}${it.date.slice(0,7)!==budgetMonth?` to ${monthLabel(it.date.slice(0,7))}`:""}`); }
+    return;
+  }
+  if (act === "ooedit") return ooEditOpen(b.dataset.oid);
+  if (act === "oosave") {
+    const it = ooRead("ooE");
+    if (!it.label || !it.amount) { toast("Add what it was and the amount"); return; }
+    if (await ooPut({ id: b.dataset.oid, ...it }, budgetMonth)) { closeModal(); toast("Saved"); }
     return;
   }
   if (act === "oodel") { const cur = (S.months.find(m=>m.id===budgetMonth)||{}).oneoffs || []; await saveMonth(budgetMonth, { oneoffs: cur.filter(o=>o.id!==b.dataset.oid) }); toast("Removed"); return; }
@@ -1886,7 +1953,7 @@ const EXP_WORDS = /\b(bill|bills|expense|expenses|spent|spend|bought|buy|cost|co
 function parseExpense(text) {
   const s = qNormalise(text);
   const r = parseQuick(text);
-  const e = { kind: "expense", recurring: false, amount: r.amount, date: r.date, day: "", label: "", group: "", propertyId: "" };
+  const e = { kind: "expense", recurring: false, amount: r.amount, date: r.date, day: "", label: "", group: "", propertyId: "", text };
   if (/\b(salary|wages|income|bonus|refund|paid in|received|got paid)\b/.test(s) && !/\b(paid for|spent|bought)\b/.test(s)) e.kind = "income";
   e.recurring = /\b(every month|each month|per month|a month|monthly|direct debit|standing order|recurring|regular)\b/.test(s) || (e.kind === "income" && /\b(salary|wages)\b/.test(s) && !/\b(bonus|one off|one-off)\b/.test(s));
   if (/\b(one off|one-off|oneoff|just once|this once)\b/.test(s)) e.recurring = false;
@@ -1941,7 +2008,7 @@ async function quickExpenseSave() {
   } else {
     const date = $("#eDate").value || todayISO(); const mk = date.slice(0,7);
     const cur = (S.months.find(m => m.id === mk) || {}).oneoffs || [];
-    const ok = await saveMonth(mk, { oneoffs: [...cur, { id: Date.now().toString(36), label, amount, kind: type === "oneoffin" ? "in" : "out", date, cat: group, propertyId }] });
+    const ok = await saveMonth(mk, { oneoffs: [...cur, { id: Date.now().toString(36), label, amount, kind: type === "oneoffin" ? "in" : "out", date, cat: OO_CATS.includes(group) ? group : ooCatFrom(group, label), propertyId, method: /\bcash\b/i.test((qState&&qState.e&&qState.e.text)||"") ? "Cash" : "Bank", reason: "" }] });
     if (ok) { closeModal(); toast(`Added ${label}: ${gbp(amount,1)} in ${monthLabel(mk)}`); }
   }
 }
@@ -2093,7 +2160,7 @@ async function importSave() {
   for (const r of sel.filter(r => r.type === "oneoff" || r.type === "oneoffin")) (byMonth[r.date.slice(0,7)] = byMonth[r.date.slice(0,7)] || []).push(r);
   for (const [mk, list] of Object.entries(byMonth)) {
     const cur = (S.months.find(m => m.id === mk) || {}).oneoffs || [];
-    const add = list.map((r, j) => ({ id: Date.now().toString(36) + j, label: r.name.trim() || "Payment", amount: num(r.amount), kind: r.type === "oneoffin" ? "in" : "out", date: r.date, cat: r.group, propertyId: r.propertyId || "" }));
+    const add = list.map((r, j) => ({ id: Date.now().toString(36) + j, label: r.name.trim() || "Payment", amount: num(r.amount), kind: r.type === "oneoffin" ? "in" : "out", date: r.date, cat: ooCatFrom(r.group, r.desc), propertyId: r.propertyId || "", method: IMP.cardStyle ? "Card" : "Bank", reason: "" }));
     if (await saveMonth(mk, { oneoffs: [...cur, ...add] })) n += list.length;
   }
   closeModal(); toast(`Added ${n} item${n===1?"":"s"} to your budget`);
