@@ -161,6 +161,7 @@ tr.grp td{background:var(--sunk);font-weight:600;font-size:12px;text-transform:u
 @media (prefers-reduced-motion:no-preference){.btn,.chip{transition:border-color .15s,background .15s}}
 @media (max-width:560px){.nw .val{font-size:21px}.brand h1{font-size:19px}}
 
+@media print{header.top nav,.toolbar,.btn,#login{display:none!important} header.top{position:static} body{background:#fff} details{display:block} details>*{display:block}}
 /* colour pass */
 header.top{background:var(--hdr)}
 .g-stats .stat{border-color:transparent}
@@ -191,7 +192,7 @@ th{background:var(--thead)}
   var resolveDb; var dbReady = new Promise(function (r) { resolveDb = r; });
   window.__hlResolveDb = resolveDb;
   var fileSaver = { save: function (req) {
-    var blob = req.data instanceof Blob ? req.data : new Blob([req.data], { type: /\.ics$/.test(req.filename) ? "text/calendar" : "application/json" });
+    var blob = req.data instanceof Blob ? req.data : new Blob([req.data], { type: /\.ics$/.test(req.filename) ? "text/calendar" : /\.csv$/.test(req.filename) ? "text/csv;charset=utf-8" : "application/json" });
     var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = req.filename;
     document.body.appendChild(a); a.click();
     setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
@@ -480,6 +481,7 @@ if (fb) {
       <button data-tab="budget" role="tab">Monthly budget</button>
       <button data-tab="properties" role="tab">Properties</button>
       <button data-tab="rent" role="tab">Rent</button>
+      <button data-tab="reports" role="tab">Reports</button>
       <button data-tab="tenants" role="tab">Tenants &amp; deposits</button>
       <button data-tab="money" role="tab">Investments &amp; savings</button>
       <button data-tab="dates" role="tab">Key dates &amp; cars</button>
@@ -540,6 +542,8 @@ try { const t = localStorage.getItem("hl.tab"); if (t) tab = t; } catch(e){}
 if (location.hash && location.hash.length > 1) tab = location.hash.slice(1);
 let rentMonth = monthKey(new Date());
 let rentProp = "all";
+let repBasis = "tax";
+let repYear = (() => { const d = new Date(); return d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1; })();
 let tenantFilter = "current";
 let dateFilter = "all";
 let quickUpdate = false;
@@ -1121,6 +1125,91 @@ VIEWS.rent = () => {
   </section>`;
 };
 
+
+// ---------- reports ----------
+function reportMonths() {
+  if (repBasis === "tax") return Array.from({length:12},(_,i)=>monthKey(new Date(repYear, 3+i, 1)));
+  return Array.from({length:12},(_,i)=>`${repYear}-${String(i+1).padStart(2,"0")}`);
+}
+const reportLabel = () => repBasis === "tax" ? `Tax year ${repYear}/${String((repYear+1)%100).padStart(2,"0")} (Apr ${repYear} – Mar ${repYear+1})` : `Calendar year ${repYear}`;
+function rentReport() {
+  const months = reportMonths();
+  const byT = new Map();
+  const blank = () => ({expected:0, received:0, bank:0, cash:0, unbanked:0, monthsPaid:0, monthsDue:0});
+  const monthly = {}; // pid -> month -> {expected, bank, cash}
+  for (const t of S.tenancies) {
+    for (const mk of months) {
+      if (!tenancyActiveIn(t, mk)) { const r0 = rentFor(t.id, mk); if (!r0 || !num(r0.received)) continue; }
+      const r = rentFor(t.id, mk) || {};
+      const due = mk > monthKey(new Date()) ? 0 : has(r.due) ? num(r.due) : (tenancyActiveIn(t, mk) ? num(t.rent) : 0);
+      const got = num(r.received);
+      const method = r.method || (t.payMethod === "Cash" ? "Cash" : "Bank");
+      if (!byT.has(t.id)) byT.set(t.id, blank());
+      const a = byT.get(t.id);
+      a.expected += due; a.received += got;
+      if (due > 0) a.monthsDue++;
+      if (due > 0 && got >= due) a.monthsPaid++;
+      if (got) { if (method === "Cash") { a.cash += got; if (r.cash !== "Banked") a.unbanked += got; } else a.bank += got; }
+      const pm = (monthly[t.propertyId] = monthly[t.propertyId] || {});
+      const m = (pm[mk] = pm[mk] || {expected:0, bank:0, cash:0});
+      m.expected += due; if (got) { if (method === "Cash") m.cash += got; else m.bank += got; }
+    }
+  }
+  const props = S.properties.filter(p => S.tenancies.some(t => t.propertyId === p.id && byT.has(t.id)));
+  const groups = props.map(p => {
+    const rows = S.tenancies.filter(t => t.propertyId === p.id && byT.has(t.id))
+      .sort((a,b)=>(a.room||"").localeCompare(b.room||"",undefined,{numeric:true}) || (a.tenantName||"").localeCompare(b.tenantName||""))
+      .map(t => ({ t, ...byT.get(t.id), outstanding: Math.max(byT.get(t.id).expected - byT.get(t.id).received, 0) }));
+    const tot = rows.reduce((o,r)=>{ for (const k of ["expected","received","bank","cash","unbanked","outstanding"]) o[k]+=r[k]; return o; }, {expected:0,received:0,bank:0,cash:0,unbanked:0,outstanding:0});
+    return { p, rows, tot, monthly: monthly[p.id] || {} };
+  });
+  const all = groups.reduce((o,g)=>{ for (const k in o) o[k]+=g.tot[k]; return o; }, {expected:0,received:0,bank:0,cash:0,unbanked:0,outstanding:0});
+  return { months, groups, all };
+}
+VIEWS.reports = () => {
+  const R = rentReport();
+  const pct = (a,b) => b ? Math.round(a/b*100)+"%" : "—";
+  const cell = v => `<td class="n">${v ? gbp(v) : '<span class="muted">—</span>'}</td>`;
+  return `<section class="block">
+    <div class="sechead"><div><h2>Rent report</h2><p class="sub">${reportLabel()}. Rent due counts months up to this one. Cash and bank totals come from what you've marked on the Rent tab.</p></div>
+      <div class="toolbar">
+        <div class="seg" role="group" aria-label="Year type">${[["tax","Tax year"],["cal","Calendar year"]].map(([k,l])=>`<button data-act="repbasis" data-m="${k}" aria-pressed="${repBasis===k}">${l}</button>`).join("")}</div>
+        <button class="btn small" data-act="repyear" data-d="-1" aria-label="Previous year">←</button><b class="num">${repBasis==="tax"?`${repYear}/${String((repYear+1)%100).padStart(2,"0")}`:repYear}</b><button class="btn small" data-act="repyear" data-d="1" aria-label="Next year">→</button>
+        <button class="btn" data-act="repcsv">Download spreadsheet (.csv)</button>${window.HL_SITE?'<button class="btn" data-act="repprint">Print</button>':""}
+      </div></div>
+    <div class="grid g-stats">
+      <div class="stat"><span class="k">Rent due</span><span class="v">${gbp(R.all.expected)}</span></div>
+      <div class="stat"><span class="k">Collected</span><span class="v">${gbp(R.all.received)}</span><span class="h">${pct(R.all.received,R.all.expected)} of rent due</span></div>
+      <div class="stat"><span class="k">Into the bank</span><span class="v">${gbp(R.all.bank)}</span><span class="h">${pct(R.all.bank,R.all.received)} of collected</span></div>
+      <div class="stat"><span class="k">In cash</span><span class="v">${gbp(R.all.cash)}</span><span class="h">${pct(R.all.cash,R.all.received)} of collected</span></div>
+      <div class="stat"><span class="k">Cash not yet banked</span><span class="v">${gbp(R.all.unbanked)}</span></div>
+      <div class="stat"><span class="k">Outstanding</span><span class="v ${R.all.outstanding?"neg":""}">${gbp(R.all.outstanding)}</span></div>
+    </div>
+  </section>
+  ${R.groups.length ? R.groups.map(g => `<section class="block">
+    <div class="sechead"><h2>${esc(g.p.name)}</h2><span class="sub">Collected ${gbp(g.tot.received)} · bank ${gbp(g.tot.bank)} · cash ${gbp(g.tot.cash)}</span></div>
+    <div class="tablewrap"><table><thead><tr><th>Room</th><th>Tenant</th><th class="n">Due</th><th class="n">Collected</th><th class="n">Bank</th><th class="n">Cash</th><th class="n">Cash not banked</th><th class="n">Outstanding</th><th class="n">Months paid</th></tr></thead><tbody>
+      ${g.rows.map(r=>`<tr><td>${esc(r.t.room||"—")}</td><td><b>${esc(r.t.tenantName)}</b>${isCurrent(r.t)?"":' <span class="chip">Moved out</span>'}</td>${cell(r.expected)}${cell(r.received)}${cell(r.bank)}${cell(r.cash)}${cell(r.unbanked)}<td class="n ${r.outstanding?"neg":""}">${r.outstanding?gbp(r.outstanding):'<span class="muted">—</span>'}</td><td class="n">${r.monthsPaid} of ${r.monthsDue}</td></tr>`).join("")}
+    </tbody><tfoot><tr><td colspan="2">Total</td>${cell(g.tot.expected)}${cell(g.tot.received)}${cell(g.tot.bank)}${cell(g.tot.cash)}${cell(g.tot.unbanked)}${cell(g.tot.outstanding)}<td></td></tr></tfoot></table></div>
+    <details class="card" style="padding:12px 16px"><summary style="cursor:pointer;font-weight:600">Month by month</summary>
+      <div class="tablewrap" style="margin-top:10px"><table><thead><tr><th>Month</th><th class="n">Due</th><th class="n">Bank</th><th class="n">Cash</th><th class="n">Total collected</th></tr></thead><tbody>
+      ${R.months.map(mk=>{ const m=g.monthly[mk]||{expected:0,bank:0,cash:0}; return `<tr><td>${monthLabel(mk)}</td>${cell(m.expected)}${cell(m.bank)}${cell(m.cash)}${cell(m.bank+m.cash)}</tr>`; }).join("")}
+      </tbody></table></div></details>
+  </section>`).join("") : `<section class="block"><div class="empty">No rent recorded for ${reportLabel()}. Rent you mark on the Rent tab appears here.</div></section>`}`;
+};
+function reportCSV() {
+  const R = rentReport(); const q = v => `"${String(v ?? "").replace(/"/g,'""')}"`; const n2 = v => (Math.round(num(v)*100)/100).toFixed(2);
+  const L = [[q("Rent report"), q(reportLabel())].join(","), "",
+    ["Property","Room","Tenant","Due","Collected","Bank","Cash","Cash not banked","Outstanding","Months paid","Months due"].map(q).join(",")];
+  for (const g of R.groups) {
+    for (const r of g.rows) L.push([q(g.p.name), q(r.t.room), q(r.t.tenantName), n2(r.expected), n2(r.received), n2(r.bank), n2(r.cash), n2(r.unbanked), n2(r.outstanding), r.monthsPaid, r.monthsDue].join(","));
+    L.push([q(g.p.name+" total"), "", "", n2(g.tot.expected), n2(g.tot.received), n2(g.tot.bank), n2(g.tot.cash), n2(g.tot.unbanked), n2(g.tot.outstanding), "", ""].join(","));
+  }
+  L.push([q("All properties"), "", "", n2(R.all.expected), n2(R.all.received), n2(R.all.bank), n2(R.all.cash), n2(R.all.unbanked), n2(R.all.outstanding), "", ""].join(","));
+  L.push("", ["Property","Month","Due","Bank","Cash","Total collected"].map(q).join(","));
+  for (const g of R.groups) for (const mk of R.months) { const m = g.monthly[mk] || {expected:0,bank:0,cash:0}; L.push([q(g.p.name), q(monthLabel(mk)), n2(m.expected), n2(m.bank), n2(m.cash), n2(m.bank+m.cash)].join(",")); }
+  return "﻿" + L.join("\r\n");
+}
 VIEWS.tenants = () => {
   const list = S.tenancies.filter(t => tenantFilter==="all" ? true : tenantFilter==="current" ? isCurrent(t) : !isCurrent(t))
     .sort((a,b)=> ((byId("properties",a.propertyId)||{}).name||"").localeCompare((byId("properties",b.propertyId)||{}).name||"") || (a.room||"").localeCompare(b.room||"",undefined,{numeric:true}));
@@ -1336,6 +1425,16 @@ document.addEventListener("click", async (e) => {
   if (act === "snapshot") { const T = totals(); const mk = monthKey(new Date()); if (await save("snapshots", mk, {net:Math.round(T.net), assets:Math.round(T.assets), liabilities:Math.round(T.liab), propertyEquity:Math.round(T.homeEq+T.rentalEq), investments:Math.round(T.inv+T.pens+T.cashS)})) toast(`Snapshot saved for ${monthLabel(mk)}`); return; }
   if (act === "backup") return backup();
   if (act === "ics") return exportICS();
+  if (act === "repbasis") { repBasis = b.dataset.m; return render(); }
+  if (act === "repyear") { repYear += +b.dataset.d; return render(); }
+  if (act === "repprint") { window.print(); return; }
+  if (act === "repcsv") {
+    if (!dlNS) { toast("Downloads aren't available in this view"); return; }
+    const fname = `rent-report-${repBasis==="tax"?`${repYear}-${String((repYear+1)%100).padStart(2,"0")}`:repYear}.csv`;
+    try { await dlNS.save({ filename: fname, data: reportCSV() }); toast("Report saved. Open it in Excel or Google Sheets."); }
+    catch (e) { if (!(e && e.code === "declined")) toast("Couldn't save the report"); }
+    return;
+  }
   if (act === "signout") { if (window.HL_SITE && window.HL_SITE.signOut) window.HL_SITE.signOut(); return; }
   if (act === "cancelimport") { pendingImport = null; return render(); }
   if (act === "doimport") return runImport();
