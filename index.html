@@ -177,6 +177,9 @@ tr.grp td{background:var(--sunk);font-weight:600;font-size:12px;text-transform:u
 main{padding-bottom:96px}
 .oo-form{background:var(--t5);border-color:transparent}
 .oo-form .field input,.oo-form .field select{background:var(--surface)}
+.upload{border:2px dashed var(--line);background:var(--t2)}
+.upload.drag{border-color:var(--accent);background:var(--t1)}
+.upload .field input,.upload .field select{background:var(--surface)}
 .modal.wide{width:min(1060px,100%)}
 .impsec{border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;display:flex;flex-direction:column;gap:8px}
 .impsec summary{cursor:pointer;padding:2px 0}
@@ -509,6 +512,7 @@ if (fb) {
       <button data-tab="tenants" role="tab">Tenants &amp; deposits</button>
       <button data-tab="money" role="tab">Investments &amp; savings</button>
       <button data-tab="dates" role="tab">Key dates &amp; cars</button>
+      <button data-tab="docs" role="tab">Documents</button>
       <button data-tab="settings" role="tab">Settings</button>
     </nav>
   </div>
@@ -555,7 +559,7 @@ let toastT;
 function toast(msg){ let t = $(".toast"); if(!t){ t=document.createElement("div"); t.className="toast"; t.setAttribute("role","status"); document.body.appendChild(t);} t.textContent=msg; t.hidden=false; clearTimeout(toastT); toastT=setTimeout(()=>t.hidden=true,2200); }
 
 // ---------- state ----------
-const COLS = ["properties","checks","tenancies","rent","accounts","debts","vehicles","reminders","snapshots","budget","months"];
+const COLS = ["properties","checks","tenancies","rent","accounts","debts","vehicles","reminders","snapshots","budget","months","documents"];
 let budgetMonth = monthKey(new Date());
 let rentBasis = "collected";
 try { const rb = localStorage.getItem("hl.rentBasis"); if (rb) rentBasis = rb; } catch(e){}
@@ -803,6 +807,7 @@ function allDates(includeUndated) {
   }
   for (const r of S.reminders) if (!r.done) out.push({cat:r.category||"Other", title:r.title, where:r.who?ownerName(r.who):"", due:r.due, col:"reminders", id:r.id, repeat:r.repeat, done:true, soon:ad(r.alertDays,30), provider:r.provider, ref:r.reference, cost:r.cost, contact:r.contact});
   for (const d of S.debts) if (d.endDate) out.push({cat:"Finance", title:`${d.name} ends`, where:"", due:d.endDate, col:"debts", id:d.id, soon:60});
+  for (const d of (S.documents||[])) if (d.expiry) out.push({cat:"Documents", title:`${d.cat||"Document"}: ${d.name}`, where:docLinkName(d.link), due:d.expiry, col:"documents", id:d.id, soon:60});
   const list = includeUndated ? out : out.filter(d => d.due);
   return list.sort((a,b)=> (a.due||"9999") < (b.due||"9999") ? -1 : 1);
 }
@@ -1075,7 +1080,7 @@ function insightsBlock(T) {
   const wRate = ratedBal ? rated.reduce((a,p)=>a+num(p.balance)*num(p.currentRate),0) / ratedBal : null;
   const L = insightList(T);
   const lvlChip = {bad:'<span class="chip bad">Act</span>', warn:'<span class="chip warn">Watch</span>', info:'<span class="chip info">Good to know</span>', good:'<span class="chip good">Opportunity</span>'};
-  const tabName = {properties:"Properties", rent:"Rent", budget:"Monthly budget", money:"Investments", settings:"Settings", reports:"Reports"};
+  const tabName = {docs:"Documents", properties:"Properties", rent:"Rent", budget:"Monthly budget", money:"Investments", settings:"Settings", reports:"Reports"};
   return `<section class="block">
     <div class="sechead"><div><h2>Financial health</h2><p class="sub">Worked out from the figures you've entered. The more you fill in, the more useful these get.</p></div></div>
     <div class="grid g-gauge">
@@ -1541,6 +1546,137 @@ async function exportICS() {
   catch (e) { if (e && e.code === "declined") return; toast("Couldn't save the calendar file"); console.error(e); }
 }
 
+// ---------- documents (files stored in the database in pieces) ----------
+const DOC_CATS = ["Tenancy agreement","Gas safety certificate","Electrical report (EICR)","EPC","HMO licence","Fire risk assessment","Insurance policy","Mortgage offer / statement","Deposit certificate","Inventory / check-in","ID / Right to Rent","Invoice / receipt","Car documents","Tax / accountant","Other"];
+const DOC_MAX = () => window.HL_SITE ? 10 * 1024 * 1024 : 3 * 1024 * 1024;
+const DOC_CHUNK = () => window.HL_SITE ? 600000 : 150000;
+let docFilter = "all", docPending = null, docBusy = "";
+function docLinkOptions(sel) {
+  const o = [`<option value="">Not linked</option>`];
+  if (S.properties.length) o.push(`<optgroup label="Properties">${S.properties.map(p=>`<option value="p:${p.id}" ${sel===`p:${p.id}`?"selected":""}>${esc(p.name)}</option>`).join("")}</optgroup>`);
+  if (S.tenancies.length) o.push(`<optgroup label="Tenants">${S.tenancies.map(t=>`<option value="t:${t.id}" ${sel===`t:${t.id}`?"selected":""}>${esc(t.tenantName)}${t.room?` · ${esc(t.room)}`:""}</option>`).join("")}</optgroup>`);
+  if (S.vehicles.length) o.push(`<optgroup label="Cars">${S.vehicles.map(v=>`<option value="v:${v.id}" ${sel===`v:${v.id}`?"selected":""}>${esc(v.name)}</option>`).join("")}</optgroup>`);
+  return o.join("");
+}
+function docLinkName(link) {
+  if (!link) return "";
+  const [k, id] = link.split(":");
+  if (k === "p") return (byId("properties", id)||{}).name || "";
+  if (k === "t") { const t = byId("tenancies", id); if (!t) return ""; const p = byId("properties", t.propertyId) || {}; return `${t.tenantName}${p.name?` · ${p.name}`:""}${t.room?` · ${t.room}`:""}`; }
+  if (k === "v") return (byId("vehicles", id)||{}).name || "";
+  return "";
+}
+const docPropOf = d => { if (!d.link) return ""; const [k,id] = d.link.split(":"); if (k === "p") return id; if (k === "t") return (byId("tenancies", id)||{}).propertyId || ""; return ""; };
+const fmtSize = n => n >= 1048576 ? (n/1048576).toFixed(1)+" MB" : Math.max(1, Math.round(n/1024))+" KB";
+function b64FromBytes(bytes) { let s = ""; for (let i = 0; i < bytes.length; i += 32768) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768)); return btoa(s); }
+function bytesFromB64(b64) { const s = atob(b64); const a = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i); return a; }
+VIEWS.docs = () => {
+  const all = [...S.documents].sort((a,b) => (b.uploadedAt||"") < (a.uploadedAt||"") ? -1 : 1);
+  const list = all.filter(d => docFilter === "all" ? true : docFilter.startsWith("p:") ? docPropOf(d) === docFilter.slice(2) : docFilter === "none" ? !d.link : d.link === docFilter);
+  const used = all.reduce((a,d)=>a+num(d.size),0);
+  const filters = [["all","All"], ...S.properties.map(p=>[`p:${p.id}`, p.name]), ["none","Not linked"]];
+  const expSoon = all.filter(d => d.expiry && daysUntil(d.expiry) !== null && daysUntil(d.expiry) <= 60).length;
+  return `<section class="block">
+    <div class="sechead"><div><h2>Documents</h2><p class="sub">Contracts, certificates and policies, kept with your ledger behind the same logins. Up to ${fmtSize(DOC_MAX())} each.</p></div></div>
+    ${canWrite ? `<div class="card upload" id="dropZone">
+      ${docPending ? `<div class="fgroup">
+          <div class="field wide"><label>File</label><div><b>${esc(docPending.file.name)}</b> <span class="muted">${fmtSize(docPending.file.size)}</span></div></div>
+          <div class="field"><label for="dName">Name</label><input id="dName" value="${esc(docPending.name)}"></div>
+          <div class="field"><label for="dCat">Type</label><select id="dCat">${DOC_CATS.map(c=>`<option ${c===docPending.cat?"selected":""}>${c}</option>`).join("")}</select></div>
+          <div class="field"><label for="dLink">Belongs to</label><select id="dLink">${docLinkOptions(docPending.link)}</select></div>
+          <div class="field"><label for="dExp">Expires / renew by</label><input type="date" id="dExp" value="${docPending.expiry||""}"><span class="hint">Optional. Adds a reminder to Key dates.</span></div>
+          <div class="field wide"><label for="dNotes">Notes</label><input id="dNotes" placeholder="e.g. Signed copy, 12-month AST starting 1 May"></div>
+        </div>
+        <div class="row" style="justify-content:flex-end"><button class="btn" data-act="dcancel" ${docBusy?"disabled":""}>Cancel</button><button class="btn primary" data-act="dsave" ${docBusy?"disabled":""}>${docBusy || "Save document"}</button></div>`
+      : `<div class="row" style="justify-content:space-between"><div><b>Add a document</b><div class="sub">PDF, photo or Word file. On a phone you can take a photo of a paper contract.</div></div>
+          <label class="btn primary" for="docFile" style="cursor:pointer">Choose file<input type="file" id="docFile" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp,.doc,.docx,.xls,.xlsx,.txt,image/*,application/pdf" hidden></label></div>`}
+    </div>` : ""}
+    <div class="grid g-stats">
+      <div class="stat"><span class="k">Documents</span><span class="v">${all.length}</span></div>
+      <div class="stat"><span class="k">Expiring in 60 days</span><span class="v ${expSoon?"neg":""}">${expSoon}</span></div>
+      <div class="stat"><span class="k">Space used</span><span class="v">${fmtSize(used)}</span><span class="h">of about 1 GB free</span></div>
+    </div>
+    <div class="row">${filters.map(([k,l])=>`<button class="btn small" data-act="dfilt" data-m="${k}" aria-pressed="${docFilter===k}" style="${docFilter===k?"border-color:var(--accent);color:var(--accent)":""}">${esc(l)}</button>`).join("")}</div>
+    ${list.length ? `<div class="tablewrap"><table><thead><tr><th>Document</th><th>Type</th><th>Belongs to</th><th>Expires</th><th class="n">Size</th><th></th></tr></thead><tbody>
+      ${list.map(d=>`<tr><td><b>${esc(d.name)}</b><div class="sub">${esc(d.fileName||"")}${d.notes?` · ${esc(d.notes)}`:""}</div><div class="sub">Added ${fmtD((d.uploadedAt||"").slice(0,10))}${d.uploadedBy?` by ${esc(d.uploadedBy)}`:""}</div></td>
+        <td><span class="chip">${esc(d.cat||"Other")}</span></td>
+        <td>${esc(docLinkName(d.link)) || '<span class="muted">—</span>'}</td>
+        <td>${d.expiry ? `${fmtD(d.expiry)}<div>${dueChip(d.expiry,{soon:60,near:120})}</div>` : '<span class="muted">—</span>'}</td>
+        <td class="n num">${fmtSize(num(d.size))}</td>
+        <td style="white-space:nowrap"><button class="btn small" data-act="dopen" data-id="${d.id}">Open</button>${canWrite?`<button class="btn ghost small" data-act="dedit" data-id="${d.id}">Edit</button><button class="btn ghost small danger" data-act="ddel" data-id="${d.id}">Delete</button>`:""}</td></tr>`).join("")}
+    </tbody></table></div>` : `<div class="empty">${all.length ? "No documents here." : "No documents yet. Add your tenancy agreements, gas and electrical certificates, EPCs and insurance policies."}</div>`}
+  </section>`;
+};
+function docStart(file) {
+  if (file.size > DOC_MAX()) { toast(`That file is ${fmtSize(file.size)}. The limit is ${fmtSize(DOC_MAX())}; try a smaller scan or photo.`); return; }
+  const base = file.name.replace(/\.[^.]+$/, "").replace(/[_\-]+/g, " ").trim();
+  const lower = file.name.toLowerCase();
+  const cat = /tenancy|\bast\b|agreement|contract|lease/.test(lower) ? "Tenancy agreement" : /gas|cp12/.test(lower) ? "Gas safety certificate" : /eicr|electric/.test(lower) ? "Electrical report (EICR)" : /\bepc\b|energy perf/.test(lower) ? "EPC" : /insur|policy/.test(lower) ? "Insurance policy" : /mortgage/.test(lower) ? "Mortgage offer / statement" : /deposit|dps|tds/.test(lower) ? "Deposit certificate" : /invoice|receipt/.test(lower) ? "Invoice / receipt" : /licen/.test(lower) ? "HMO licence" : "Other";
+  docPending = { file, name: base || file.name, cat, link: docFilter.startsWith("p:") ? docFilter : "", expiry: "" };
+  render();
+}
+async function docSave() {
+  if (!docPending || docBusy) return;
+  const meta = { name: ($("#dName").value || docPending.file.name).trim(), cat: $("#dCat").value, link: $("#dLink").value, expiry: $("#dExp").value, notes: ($("#dNotes").value||"").trim() };
+  const file = docPending.file;
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const size = DOC_CHUNK(); const n = Math.max(1, Math.ceil(bytes.length / size));
+    const id = db.collection("documents").doc().id;
+    for (let i = 0; i < n; i++) {
+      docBusy = `Uploading ${Math.round(i / n * 100)}%…`; render();
+      const ok = await save("docchunks", `${id}_${i}`, { docId: id, i, data: b64FromBytes(bytes.subarray(i*size, (i+1)*size)) });
+      if (!ok) throw new Error("chunk");
+    }
+    const ok = await save("documents", id, { ...meta, fileName: file.name, mime: file.type || "application/octet-stream", size: file.size, chunks: n, uploadedAt: new Date().toISOString(), uploadedBy: (window.HL_SITE && window.HL_SITE.email) || "" });
+    if (!ok) throw new Error("meta");
+    docPending = null; docBusy = ""; render(); toast(`Saved ${meta.name}`);
+  } catch (e) { docBusy = ""; render(); toast("Couldn't save the document. Check your connection and try again."); console.error(e); }
+}
+async function docBlob(d) {
+  const parts = [];
+  for (let i = 0; i < num(d.chunks); i++) {
+    const snap = await db.doc(`docchunks/${d.id}_${i}`).get();
+    if (!snap.exists) throw new Error("missing piece " + i);
+    parts.push(bytesFromB64(snap.data().data));
+  }
+  return new Blob(parts, { type: d.mime || "application/octet-stream" });
+}
+async function docOpen(id) {
+  const d = byId("documents", id); if (!d) return;
+  const win = window.HL_SITE ? window.open("", "_blank") : null;
+  if (win) win.document.write(`<p style="font:16px system-ui;padding:24px">Opening ${esc(d.name)}…</p>`);
+  try {
+    toast("Opening…");
+    const blob = await docBlob(d);
+    if (win) { win.location.href = URL.createObjectURL(blob); return; }
+    if (dlNS) { await dlNS.save({ filename: d.fileName || d.name, data: blob }); return; }
+    toast("Opening files isn't available in this view");
+  } catch (e) { if (win) win.close(); if (!(e && e.code === "declined")) toast("Couldn't open that document"); console.error(e); }
+}
+async function docDelete(id) {
+  const d = byId("documents", id); if (!d) return;
+  await remove("documents", id);
+  for (let i = 0; i < num(d.chunks); i++) await remove("docchunks", `${id}_${i}`);
+  toast(`Deleted ${d.name}`);
+}
+function docEditOpen(id) {
+  const d = byId("documents", id); if (!d) return;
+  $("#modalRoot").innerHTML = `<div class="scrim" id="scrim"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="dT">
+    <header><h2 id="dT">Edit document</h2><button class="btn ghost" data-act="close" aria-label="Close">✕</button></header>
+    <div style="padding:16px 18px;display:flex;flex-direction:column;gap:14px"><div class="fgroup">
+      <div class="field"><label for="deName">Name</label><input id="deName" value="${esc(d.name)}"></div>
+      <div class="field"><label for="deCat">Type</label><select id="deCat">${DOC_CATS.map(c=>`<option ${c===d.cat?"selected":""}>${c}</option>`).join("")}</select></div>
+      <div class="field"><label for="deLink">Belongs to</label><select id="deLink">${docLinkOptions(d.link)}</select></div>
+      <div class="field"><label for="deExp">Expires / renew by</label><input type="date" id="deExp" value="${d.expiry||""}"></div>
+      <div class="field wide"><label for="deNotes">Notes</label><input id="deNotes" value="${esc(d.notes||"")}"></div>
+    </div><div class="row" style="justify-content:flex-end"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="dupd" data-id="${d.id}">Save</button></div></div></div></div>`;
+}
+document.addEventListener("change", (e) => { if (e.target.id === "docFile" && e.target.files && e.target.files[0]) { const f = e.target.files[0]; e.target.value = ""; docStart(f); } });
+document.addEventListener("dragover", (e) => { if (tab === "docs" && canWrite) { e.preventDefault(); const z = $("#dropZone"); if (z) z.classList.add("drag"); } });
+document.addEventListener("dragleave", (e) => { const z = $("#dropZone"); if (z && !z.contains(e.relatedTarget)) z.classList.remove("drag"); });
+document.addEventListener("drop", (e) => { if (tab === "docs" && canWrite && e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) { e.preventDefault(); docStart(e.dataTransfer.files[0]); } });
+
 VIEWS.settings = () => {
   const n = names();
   return `<section class="block">
@@ -1631,7 +1767,7 @@ document.addEventListener("click", async (e) => {
   if (act === "close") return closeModal();
   if (act === "submit") return submitForm();
   if (act === "new") { const preset = {}; if (b.dataset.prop) preset.propertyId = b.dataset.prop; if (b.dataset.col==="tenancies") { preset.status="Current"; preset.depositStatus="Held"; preset.rentDay=1; } if (b.dataset.col==="accounts") { preset.currency="GBP"; preset.asOf=todayISO(); } if (b.dataset.col==="checks"||b.dataset.col==="reminders") preset.repeat = "Yearly"; return openForm(b.dataset.col, null, preset); }
-  if (act === "edit") return openForm(b.dataset.col, b.dataset.id);
+  if (act === "edit") return b.dataset.col === "documents" ? docEditOpen(b.dataset.id) : openForm(b.dataset.col, b.dataset.id);
   if (act === "del") { if (b.dataset.armed) { const ok = await remove(b.dataset.col, b.dataset.id); if (ok) { if (b.dataset.col==="properties") for (const c of S.checks.filter(c=>c.propertyId===b.dataset.id)) await remove("checks", c.id); closeModal(); toast("Deleted"); } } else { b.dataset.armed = "1"; b.textContent = "Tap again to delete"; } return; }
   if (act === "done") return markDone(b.dataset.col, b.dataset.id, b.dataset.vfield);
   if (act === "month") { rentMonth = addMonths(rentMonth, +b.dataset.d); return render(); }
@@ -1644,6 +1780,13 @@ document.addEventListener("click", async (e) => {
   if (act === "snapshot") { const T = totals(); const mk = monthKey(new Date()); if (await save("snapshots", mk, {net:Math.round(T.net), assets:Math.round(T.assets), liabilities:Math.round(T.liab), propertyEquity:Math.round(T.homeEq+T.rentalEq), investments:Math.round(T.inv+T.pens+T.cashS)})) toast(`Snapshot saved for ${monthLabel(mk)}`); return; }
   if (act === "backup") return backup();
   if (act === "ics") return exportICS();
+  if (act === "dsave") return docSave();
+  if (act === "dcancel") { docPending = null; return render(); }
+  if (act === "dfilt") { docFilter = b.dataset.m; return render(); }
+  if (act === "dopen") return docOpen(b.dataset.id);
+  if (act === "dedit") return docEditOpen(b.dataset.id);
+  if (act === "dupd") { const ok = await patch("documents", b.dataset.id, { name: $("#deName").value.trim(), cat: $("#deCat").value, link: $("#deLink").value, expiry: $("#deExp").value, notes: $("#deNotes").value.trim() }); if (ok) { closeModal(); toast("Saved"); } return; }
+  if (act === "ddel") { if (b.dataset.armed) return docDelete(b.dataset.id); b.dataset.armed = "1"; b.textContent = "Tap again to delete"; return; }
   if (act === "quick-open") return quickOpen();
   if (act === "esave") return quickExpenseSave();
   if (act === "import-open") return importOpen();
