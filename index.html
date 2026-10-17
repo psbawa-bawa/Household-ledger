@@ -755,7 +755,7 @@ function tenancyActiveIn(t, mk) {
   const first = parseD(mk + "-01"); const last = new Date(first.getFullYear(), first.getMonth()+1, 0);
   const s = parseD(t.startDate), e = parseD(t.endDate);
   if (s && s > last) return false;
-  if (e && e < first) return false;
+  if (e && e < first && t.status !== "Current") return false;
   if (!e && t.status === "Moved out") return false;
   return true;
 }
@@ -802,7 +802,7 @@ function allDates(includeUndated) {
   for (const p of S.properties) {
     if (p.productEnd) out.push({cat:"Mortgage", title:`Mortgage deal ends (${pct(p.currentRate)})`, where:p.name, due:p.productEnd, col:"properties", id:p.id, soon:120, provider:p.lender});
   }
-  for (const t of S.tenancies) if (isCurrent(t) && t.endDate) out.push({cat:"Tenancy", title:`Tenancy ends: ${t.tenantName||"tenant"}`, where:(byId("properties",t.propertyId)||{}).name||"", due:t.endDate, col:"tenancies", id:t.id, soon:60});
+  for (const t of S.tenancies) if (isCurrent(t) && t.endDate) out.push({cat:"Tenancy", title: daysUntil(t.endDate) < 0 ? `Fixed term ended: ${t.tenantName||"tenant"}` : `Tenancy ends: ${t.tenantName||"tenant"}`, tenancy:true, where:(byId("properties",t.propertyId)||{}).name||"", due:t.endDate, col:"tenancies", id:t.id, soon:60});
   for (const v of S.vehicles) for (const [k,l,def] of VF) {
     if (!v[k] && !includeUndated) continue;
     const extra = k==="insuranceDue" ? {provider:v.insurer, ref:v.policyNo, cost:v.insurancePremium, contact:v.insurerPhone} : k==="breakdownDue" ? {provider:v.breakdownProvider, ref:v.breakdownRef} : k==="taxDue" ? {cost:v.taxCost} : k==="serviceDue" ? {provider:v.garage} : {};
@@ -957,11 +957,12 @@ function lineChart(pts) {
 }
 
 function dateRow(d, opts={}) {
-  const btn = canWrite && d.done && d.due ? `<button class="btn small" data-act="done" data-col="${d.col}" data-id="${d.id}" ${d.vfield?`data-vfield="${d.vfield}"`:""}>${d.repeat && REPEAT[d.repeat] && d.repeat!=="One-off" ? "Done · set next" : d.col==="vehicles" ? "Renewed +1 yr" : "Done"}</button>` : "";
+  const tenBtns = canWrite && d.tenancy ? `<button class="btn small" data-act="tenroll" data-id="${d.id}" title="They're staying on a month-to-month tenancy">Now rolling</button><button class="btn small" data-act="edit" data-col="tenancies" data-id="${d.id}" title="Enter the new end date">Renewed</button><button class="btn ghost small danger" data-act="tenout" data-id="${d.id}">Moved out</button>` : "";
+  const btn = tenBtns ? tenBtns : canWrite && d.done && d.due ? `<button class="btn small" data-act="done" data-col="${d.col}" data-id="${d.id}" ${d.vfield?`data-vfield="${d.vfield}"`:""}>${d.repeat && REPEAT[d.repeat] && d.repeat!=="One-off" ? "Done · set next" : d.col==="vehicles" ? "Renewed +1 yr" : "Done"}</button>` : "";
   const meta = [d.where, d.provider, d.ref?`Ref ${d.ref}`:"", has(d.cost)&&num(d.cost)?gbp(d.cost):"", d.contact].filter(Boolean).map(esc).join(" · ");
   const n = daysUntil(d.due);
   const stripe = !d.due ? "none" : n < 0 ? "bad" : n <= d.soon ? "warn" : n <= 90 ? "info" : "good";
-  return `<div class="li dl ${stripe}"><div class="t"><b>${esc(d.title)}</b>${opts.hideCat?"":` <span class="chip">${esc(d.cat)}</span>`}<div class="m">${d.due?`<span class="num">${fmtD(d.due)}</span>`:"No date yet"}${meta?" · "+meta:""}</div></div><div class="row">${d.due?dueChip(d.due,{soon:d.soon,near:90}):""}${btn}${canWrite?`<button class="btn ghost small" data-act="edit" data-col="${d.col}" data-id="${d.id}">${d.due?"Edit":"Add date"}</button>`:""}</div></div>`;
+  return `<div class="li dl ${stripe}"><div class="t"><b>${esc(d.title)}</b>${opts.hideCat?"":` <span class="chip">${esc(d.cat)}</span>`}<div class="m">${d.due?`<span class="num">${fmtD(d.due)}</span>`:"No date yet"}${meta?" · "+meta:""}</div></div><div class="row">${d.due?dueChip(d.due,{soon:d.soon,near:90}):""}${btn}${canWrite&&!d.tenancy?`<button class="btn ghost small" data-act="edit" data-col="${d.col}" data-id="${d.id}">${d.due?"Edit":"Add date"}</button>`:""}</div></div>`;
 }
 
 // ---------- insights ----------
@@ -1911,6 +1912,8 @@ document.addEventListener("click", async (e) => {
   if (act === "snapshot") { const T = totals(); const mk = monthKey(new Date()); if (await save("snapshots", mk, {net:Math.round(T.net), assets:Math.round(T.assets), liabilities:Math.round(T.liab), propertyEquity:Math.round(T.homeEq+T.rentalEq), investments:Math.round(T.inv+T.pens+T.cashS)})) toast(`Snapshot saved for ${monthLabel(mk)}`); return; }
   if (act === "backup") return backup();
   if (act === "ics") return exportICS();
+  if (act === "tenroll") { const t = byId("tenancies", b.dataset.id); if (!t) return; if (await patch("tenancies", t.id, { endDate: "", fixedTermEnded: t.endDate || "", status: "Current" })) toast(`${t.tenantName} is now on a rolling tenancy`); return; }
+  if (act === "tenout") { const t = byId("tenancies", b.dataset.id); if (!t) return; if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Tap again to confirm"; return; } if (await patch("tenancies", t.id, { status: "Moved out" })) toast(`${t.tenantName} marked as moved out. Remember to sort out their deposit.`); return; }
   if (act === "cats-open") return catsManageOpen();
   if (act === "catadd") { const inp = $("#catnew-" + b.dataset.i); const v = (inp && inp.value || "").trim(); if (!v) { inp && inp.focus(); return; } await addCategory(b.dataset.g, v); toast(`Added ${v} to ${b.dataset.g}`); setTimeout(catsManageOpen, 150); return; }
   if (act === "catdel") { const g = b.dataset.g, c = b.dataset.c; const all = { ...(S.settings.budgetCats || {}) }; for (const gg of bGroups()) if (!all[gg]) all[gg] = bCats(gg); all[g] = bCats(g).filter(x => x !== c); await save("settings", "main", { ...S.settings, budgetCats: all }); toast(`Removed ${c}`); setTimeout(catsManageOpen, 150); return; }
