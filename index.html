@@ -1156,7 +1156,7 @@ function budgetFor(mk) {
 const BG_DEFAULT = ["Bawa Residence", "Nene Gardens", "Renaissance Court"];
 const CAT_DEFAULT = {
   "Bawa Residence": ["Direct debits","Groceries","Entertainment","Gifts","Grooming","Clothes","Subscriptions","Children","Savings & investments","India commitment","Loans & finances","Credit cards","Car"],
-  _property: ["Direct debits","Utilities","Insurance","Repairs & maintenance","Service charge & ground rent","Agent & licence fees"]
+  _property: ["Direct debits","Utilities","Council tax","Insurance","Repairs & maintenance","Cleaning","Service charge & ground rent","Agent & licence fees","Bank charges"]
 };
 const bGroups = () => (S.settings.budgetGroups && S.settings.budgetGroups.length) ? S.settings.budgetGroups : BG_DEFAULT;
 const bCats = g => { const c = (S.settings.budgetCats || {})[g]; return c && c.length ? c : (CAT_DEFAULT[g] || CAT_DEFAULT._property); };
@@ -1186,9 +1186,13 @@ const CAT_RULES = [
   [/\bisa\b|trading ?212|vanguard|aj bell|hargreaves|savings|invest/, "Savings & investments"],
   [/repair|plumb|boiler|maintenance|screwfix|toolstation|wickes|b&q|handyman|electrician/, "Repairs & maintenance"],
   [/\bgas\b|electric|water|energy|octopus|british gas|broadband|utilit/, "Utilities"],
-  [/insurance|landlord cover/, "Insurance"],
-  [/service charge|ground rent/, "Service charge & ground rent"],
-  [/agent|licen|lettings?/, "Agent & licence fees"],
+  [/insurance|landlord cover|appliance care|d&g|ao care|care plan|homeserve/, "Insurance"],
+  [/tv licen/, "Direct debits"],
+  [/openrent|rightmove|zoopla|spareroom|agent|hmo licen|licence fee|lettings?|tenancy deposit|\bdps\b|\btds\b/, "Agent & licence fees"],
+  [/service charge|ground rent|\ba2d|-rent\b|management co/, "Service charge & ground rent"],
+  [/council|\bl\.\s?b\.|london borough|borough|district\b/, "Council tax"],
+  [/account fee|bank charge|overdraft|\bfee\b/, "Bank charges"],
+  [/clean/, "Cleaning"],
 ];
 function mapCat(g, raw, text, isBill) {
   const cats = bCats(g); const r = String(raw || "").trim();
@@ -2022,7 +2026,7 @@ document.addEventListener("click", async (e) => {
   if (act === "import-open") return importOpen();
   if (act === "impsave") return importSave();
   if (act === "impflip") { if (IMP) importLoad(IMP.file, !IMP.cardStyle); return; }
-  if (act === "impall") { if (IMP) { const on = b.dataset.on === "1"; IMP.rows.forEach(r => { if (r.section === b.dataset.sec) r.include = on; }); importRender(); } return; }
+  if (act === "impall") { if (IMP) { const on = b.dataset.on === "1"; IMP.rows.forEach(r => { if (r.section === b.dataset.sec && !r.dup) r.include = on; }); importRender(); } return; }
   if (act === "qmic") return quickListen();
   if (act === "qsave") return quickSave();
   if (act === "repbasis") { repBasis = b.dataset.m; return render(); }
@@ -2439,22 +2443,57 @@ function parseStatement(text, flip) {
   if (cardStyle) for (const t of tx) { const o = t.out; t.out = t.inn; t.inn = o; }
   return { tx, cardStyle };
 }
-const LENDERS = /\b(halifax|nationwide|santander|barclays mortgage|natwest|lloyds|tsb|coventry|skipton|yorkshire b|leeds b|kensington|precise|paragon|mortgage works|bm solutions|accord|virgin money|hsbc mortgage|first direct|metro bank|aldermore|together|foundation home|kent reliance|mortgage)\b/i;
-const txMethod = t => /^(\)\)\)|VIS|CPT?|POS|DEB)$/.test(t.type || "") ? "Card" : /^ATM$/.test(t.type || "") ? "Cash" : "Bank";
+// Mortgage lenders: specialist ones always mean a mortgage; high-street banks only for larger direct debits.
+const MORTGAGE_ONLY = /\b(mortgage|kent reliance|midshires|birmingham midshires|bm solutions|mortgage works|paragon|precise|kensington|accord|aldermore|together money|foundation home|onesavings|osb|charter court|fleet mortgages|keystone|landbay|vida homeloans|godiva|platform home)\b/i;
+const LENDERS = /\b(halifax|nationwide|santander|natwest|lloyds|tsb|coventry b|skipton|yorkshire b|leeds b|virgin money|hsbc|first direct|metro bank|barclays mortgage)\b/i;
+const txMethod = t => /^(\)\)\)|VIS|CPT?|POS|DEB)$/.test(t.type || "") ? "Card" : /^(ATM|CPT)$/.test(t.type || "") ? "Cash" : "Bank";
+const txKey = t => `${t.date}|${(t.out || t.inn).toFixed(2)}|${String(t.desc || "").toLowerCase().replace(/\s+/g, " ").slice(0, 40)}`;
 function txName(t) {
   const name = t.name || t.desc, ref = t.ref || "";
   if (ref && /^(SO|BP|OBP|TFR|FPO|FPI|CR)$/.test(t.type || "") && !/^(?=.*\d)[A-Z0-9]{8,}$/i.test(ref.replace(/\s/g, ""))) return `${ref} · ${name}`;
   return name;
 }
-function buildImportRows(tx) {
-  // 1. group by payee; 2. inside a group, keep separate payments that happen more than once in the same month apart
+// Money moving between your own accounts (your names, the joint account name, or a bank "transfer" line).
+const OWN_RE = /\b(p\.?\s?s?\.?\s?bawa|prabhjot|bawa\s?&\s?ashri|shalini|s\.?\s?bawa|mrs?\s+p\s+bawa)\b/i;
+const isOwnTransfer = t => t.type === "TFR" || OWN_RE.test(String(t.desc || "").replace(/\s+/g, " "));
+const payKey = t => merchantKey(t.name || t.desc);
+// Who paid this rent? Remembered matches first, then the tenant's name in the payment description.
+function matchTenant(t) {
+  const map = S.settings.payerMap || {};
+  const k = payKey(t); if (map[k] && byId("tenancies", map[k])) return map[k];
+  const words = new Set(String(t.desc || "").toLowerCase().replace(/[^a-z ]/g, " ").split(/\s+/).filter(w => w.length >= 3));
+  const hits = S.tenancies.filter(x => String(x.tenantName || "").toLowerCase().replace(/[^a-z ]/g, " ").split(/\s+/).some(w => w.length >= 3 && !["and","the","mrs","miss"].includes(w) && words.has(w)));
+  const current = hits.filter(isCurrent);
+  return (current.length === 1 ? current[0] : hits.length === 1 ? hits[0] : null)?.id || "";
+}
+// Which month a rent payment is for: the month whose rent day is closest to the payment date.
+function rentMonthFor(tid, date) {
+  const t = byId("tenancies", tid); const day = Math.min(num(t && t.rentDay) || 1, 28);
+  const d = parseD(date); let best = null, bd = 1e9;
+  for (const off of [-1, 0, 1]) { const m = new Date(d.getFullYear(), d.getMonth() + off, day); const diff = Math.abs(m - d); if (diff < bd) { bd = diff; best = m; } }
+  return monthKey(best);
+}
+function buildImportRows(tx, defGroup) {
+  const rows = [];
+  const payee = S.settings.payeeMap || {};
+  // money in: one row per payment (rent is matched to a tenant)
+  for (const t of tx.filter(t => t.inn)) {
+    const tid = matchTenant(t), own = isOwnTransfer(t);
+    const salary = /salary|wages|payroll|\bbgc\b/i.test(t.desc) || t.type === "BGC";
+    const r = { section: "in", key: txKey(t), include: !!tid && !own, name: titleCase(txName(t)).slice(0, 40), desc: t.desc, ref: t.ref || "", method: txMethod(t), amount: t.inn, day: +t.date.slice(8,10), date: t.date, count: 1, months: 1, tenantId: tid,
+      type: tid && !own ? "rent" : salary ? "income" : "oneoffin", rentMonth: tid ? rentMonthFor(tid, t.date) : t.date.slice(0,7),
+      note: own ? "Looks like a transfer between your own accounts" : tid || defGroup === homeGroup() ? "" : "If this is rent, choose “Rent from tenant” and pick who paid it. It will be remembered." };
+    const k = classify({ propertyId: tid ? (byId("tenancies", tid) || {}).propertyId : "", label: r.name }, false); r.bgroup = defGroup || k.g; r.bcat = "";
+    rows.push(r);
+  }
+  // money out: group repeating payments by payee; keep separate payments made more than once a month apart
   const base = new Map();
-  for (const t of tx) { const k = (t.out ? "o:" : "i:") + merchantKey((t.ref && /^(SO|BP|OBP)$/.test(t.type||"")) ? t.desc : (t.name || t.desc)); if (!base.has(k)) base.set(k, []); base.get(k).push(t); }
+  for (const t of tx.filter(t => t.out)) { const k = "o:" + merchantKey((t.ref && /^(SO|BP|OBP)$/.test(t.type||"")) ? t.desc : (t.name || t.desc)); if (!base.has(k)) base.set(k, []); base.get(k).push(t); }
   const groups = [];
   for (const [k, list] of base) {
     const perMonth = {}; list.forEach(t => { const m = t.date.slice(0,7); perMonth[m] = (perMonth[m] || 0) + 1; });
     if (Math.max(...Object.values(perMonth)) <= 1) { groups.push([k, list]); continue; }
-    const byAmt = new Map(); for (const t of list) { const a = (t.out || t.inn).toFixed(2); if (!byAmt.has(a)) byAmt.set(a, []); byAmt.get(a).push(t); }
+    const byAmt = new Map(); for (const t of list) { const a = t.out.toFixed(2); if (!byAmt.has(a)) byAmt.set(a, []); byAmt.get(a).push(t); }
     for (const [a, sub] of byAmt) {
       const pm = {}; const idx = sub.map(t => { const m = t.date.slice(0,7); pm[m] = (pm[m] || 0) + 1; return pm[m] - 1; });
       const n = Math.max(...Object.values(pm));
@@ -2462,9 +2501,7 @@ function buildImportRows(tx) {
     }
   }
   const existing = new Set(S.budget.map(b => merchantKey(b.label)));
-  const rows = [];
   for (const [k, list, nth] of groups) {
-    const isOut = k.startsWith("o:");
     list.sort((a,b) => a.date < b.date ? -1 : 1);
     const t0 = list[list.length - 1];
     const months = new Set(list.map(t => t.date.slice(0,7)));
@@ -2473,23 +2510,39 @@ function buildImportRows(tx) {
     const isCard = list.every(t => /^(\)\)\)|VIS|ATM|CPT?|POS|DEB)$/.test(t.type || ""));
     const recurring = ddso || (months.size >= (isCard ? 3 : 2) && spanDays >= 25);
     const g = guessGroup(t0.desc);
-    const amounts = list.map(t => isOut ? t.out : t.inn);
+    const amounts = list.map(t => t.out); const last = amounts[amounts.length - 1];
     const days = list.map(t => +t.date.slice(8,10)); const dayMode = [...days].sort((a,b)=>days.filter(x=>x===b).length-days.filter(x=>x===a).length)[0];
     const already = existing.has(merchantKey(t0.name || t0.desc));
-    const isMortgage = g.group === "Mortgage" || (isOut && LENDERS.test(t0.desc) && amounts[amounts.length-1] >= 300);
-    const isRentIn = !isOut && S.tenancies.some(t => String(t.tenantName||"").toLowerCase().split(/\s+/).some(w => w.length >= 3 && t0.desc.toLowerCase().includes(w)));
-    if (recurring) {
-      const last = amounts[amounts.length - 1]; const varies = Math.max(...amounts) > Math.min(...amounts) * 1.1;
-      const nm = titleCase(txName(t0)).slice(0, 40) + (nth ? ` (${nth})` : "");
-      rows.push({ section: isOut ? "rec" : "recin", include: isOut && !already && !isMortgage, name: nm, desc: t0.desc, ref: t0.ref || "", method: txMethod(t0), type: isOut ? "bill" : "income", amount: Math.round(last*100)/100, day: dayMode, date: t0.date, group: isMortgage ? "" : (g.group || (isOut ? "" : "Salaries")), propertyId: g.propertyId, count: list.length, months: months.size, varies,
-        note: already ? "Already in your budget" : isMortgage ? "Looks like a mortgage. These are already counted from Properties" : isRentIn ? "Looks like rent, which comes from the Rent tab" : varies ? "Amount changes month to month" : "" });
-    } else {
-      for (const t of list) rows.push({ section: isOut ? "one" : "onein", include: false, name: titleCase(txName(t)).slice(0, 40), desc: t.desc, ref: t.ref || "", method: txMethod(t), type: isOut ? "oneoff" : "oneoffin", amount: isOut ? t.out : t.inn, day: +t.date.slice(8,10), date: t.date, group: g.group === "Mortgage" ? "" : g.group, propertyId: g.propertyId, count: 1, months: 1, note: isRentIn ? "Looks like rent, which comes from the Rent tab" : "" });
-    }
+    const isMortgage = g.group === "Mortgage" || MORTGAGE_ONLY.test(t0.desc) || (LENDERS.test(t0.desc) && last >= 300);
+    const own = isOwnTransfer(t0);
+    const saving = /\b(saver|savings|isa\b|premium bonds|ns&i)\b/i.test(t0.desc);
+    const remembered = payee[payKey(t0)];
+    const note = already ? "Already in your budget" : isMortgage ? "Looks like a mortgage. These are already counted from Properties" : own ? "Looks like a transfer between your own accounts" : saving ? "Money moved to savings, not spending" : "";
+    const varies = Math.max(...amounts) > Math.min(...amounts) * 1.1;
+    const base = { desc: t0.desc, ref: t0.ref || "", method: txMethod(t0), propertyId: g.propertyId, group: g.group === "Mortgage" ? "" : g.group, note, remembered };
+    if (recurring) rows.push({ ...base, section: "rec", key: list.map(txKey).join("~"), include: !already && !isMortgage && !own && !saving, name: titleCase(txName(t0)).slice(0, 40) + (nth ? ` (${nth})` : ""), type: "bill", amount: Math.round(last*100)/100, day: dayMode, date: t0.date, count: list.length, months: months.size, varies, note: note || (varies ? "Amount changes month to month" : "") });
+    else for (const t of list) rows.push({ ...base, section: "one", key: txKey(t), include: !isMortgage && !own && !saving && !!remembered, name: titleCase(txName(t)).slice(0, 40), desc: t.desc, ref: t.ref || "", method: txMethod(t), type: "oneoff", amount: t.out, day: +t.date.slice(8,10), date: t.date, count: 1, months: 1 });
   }
-  for (const r of rows) { const k = classify({ group: r.group, propertyId: r.propertyId, label: r.name + " " + r.desc }, r.section === "rec"); r.bgroup = k.g; r.bcat = k.c; }
-  const ord = { rec: 0, one: 1, recin: 2, onein: 3 };
-  return rows.sort((a,b) => ord[a.section]-ord[b.section] || (a.section === "one" || a.section === "onein" ? (a.date < b.date ? -1 : 1) : b.amount - a.amount));
+  // group + category: remembered choice, then a property named in the description, then the statement's default group
+  for (const r of rows) {
+    if (r.section === "in") continue;
+    if (r.remembered && bGroups().includes(r.remembered.g)) { r.bgroup = r.remembered.g; r.bcat = r.remembered.c || ""; continue; }
+    r.bgroup = r.propertyId ? (groupOfProperty(r.propertyId) || defGroup) : defGroup;
+    r.bcat = mapCat(r.bgroup, r.group, r.name + " " + r.desc, r.section === "rec");
+  }
+  // already imported before? (same date, amount and description)
+  const seenOne = new Set(S.months.flatMap(m => (m.oneoffs || []).map(o => o.srcKey).filter(Boolean)));
+  const seenRent = new Set(S.rent.flatMap(r => r.bankTx || []));
+  for (const r of rows) if ((r.section === "one" && seenOne.has(r.key)) || (r.section === "in" && (seenRent.has(r.key) || seenOne.has(r.key)))) { r.include = false; r.dup = true; r.note = "Already imported"; }
+  const ord = { in: 0, rec: 1, one: 2 };
+  return rows.sort((a,b) => ord[a.section]-ord[b.section] || (a.section === "rec" ? b.amount - a.amount : (a.date < b.date ? -1 : 1)));
+}
+// The group most of this statement's spending belongs to: the property whose tenants pay into it, otherwise your home.
+function defaultImportGroup(tx) {
+  const count = {};
+  for (const t of tx.filter(t => t.inn)) { const tid = matchTenant(t); if (!tid) continue; const g = groupOfProperty((byId("tenancies", tid) || {}).propertyId); if (g) count[g] = (count[g] || 0) + 1; }
+  const best = Object.entries(count).sort((a,b) => b[1]-a[1])[0];
+  return best ? best[0] : homeGroup();
 }
 function importOpen() {
   if (!canWrite) { toast("You can view this page but not change it"); return; }
@@ -2497,42 +2550,52 @@ function importOpen() {
   $("#modalRoot").innerHTML = `<div class="scrim" id="scrim"><div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="iTitle">
     <header><h2 id="iTitle">Import a bank statement</h2><button class="btn ghost" data-act="close" aria-label="Close">✕</button></header>
     <div style="padding:16px 18px;display:flex;flex-direction:column;gap:14px" id="impBody">
-      <p class="sub" style="margin:0;max-width:70ch">Choose your statement: the <b>PDF</b> from your bank's app or website (HSBC statements are read exactly), or a <b>CSV</b> export. Two or three months works best: payments that repeat are spotted as monthly bills. The file stays on this device; only the lines you choose are saved.</p>
+      <p class="sub" style="margin:0;max-width:72ch">Choose the <b>PDF</b> statement from your bank (HSBC and Lloyds are read exactly) or a <b>CSV</b> export. Rent paid in by tenants goes to the Rent tab; bills and spending go to the Monthly budget. Anything already imported is skipped. The file stays on this device; only the lines you tick are saved.</p>
       <div class="row"><input type="file" id="impFile" accept=".csv,.pdf,text/csv,application/pdf" class="input"></div>
       <div id="impOut"></div>
     </div></div></div>`;
 }
+function tenantOptions(sel) {
+  const groups = S.properties.map(p => [p, S.tenancies.filter(t => t.propertyId === p.id).sort((a,b)=>(isCurrent(b)?1:0)-(isCurrent(a)?1:0) || (a.room||"").localeCompare(b.room||"",undefined,{numeric:true}))]).filter(([,l]) => l.length);
+  return `<option value="">Choose tenant…</option>` + groups.map(([p, l]) => `<optgroup label="${esc(p.name)}">${l.map(t => `<option value="${t.id}" ${t.id===sel?"selected":""}>${esc(t.tenantName)}${t.room?` · ${esc(t.room)}`:""}${isCurrent(t)?"":" (moved out)"}</option>`).join("")}</optgroup>`).join("");
+}
 function importRender() {
   if (!IMP) return;
-  const sec = { rec: ["Repeating payments out", "Suggested as monthly bills. Untick anything you don't want."], one: ["Other payments out", "Tick the ones to add as one-off spends."], recin: ["Repeating money in", "Salaries and other regular income. Rent is already counted from the Rent tab."], onein: ["Other money in", "Refunds, bonuses and other one-off income."] };
-  const typeOpts = (r) => (r.section === "recin" || r.section === "onein" ? [["income","Monthly income"],["oneoffin","One-off money in"]] : [["bill","Monthly bill"],["oneoff","One-off spend"]]).map(([k,l]) => `<option value="${k}" ${r.type===k?"selected":""}>${l}</option>`).join("");
-  const propOpts = (r) => `<option value="">—</option>` + S.properties.map(p => `<option value="${p.id}" ${p.id===r.propertyId?"selected":""}>${esc(p.name)}</option>`).join("");
+  const sec = {
+    in: ["Money in", "Rent from tenants is matched automatically; choose the tenant for any it couldn't match. Untick transfers between your own accounts."],
+    rec: ["Repeating payments out", "Suggested as monthly bills. Untick anything you don't want."],
+    one: ["Other payments out", "Tick the ones to add as one-off spends."] };
+  const typeOpts = r => (r.section === "in" ? [["rent","Rent from tenant"],["income","Monthly income"],["oneoffin","One-off money in"]] : [["bill","Monthly bill"],["oneoff","One-off spend"]]).map(([k,l]) => `<option value="${k}" ${r.type===k?"selected":""}>${l}</option>`).join("");
+  const catSel = (r, i) => `<select data-ir="${i}" data-if="bcat" aria-label="Category"><option value="">Choose…</option>${(r.bcat && !bCats(r.bgroup).includes(r.bcat) ? [r.bcat, ...bCats(r.bgroup)] : bCats(r.bgroup)).map(c=>`<option ${c===r.bcat?"selected":""}>${esc(c)}</option>`).join("")}</select>`;
+  const grpSel = (r, i) => `<select data-ir="${i}" data-if="bgroup" aria-label="Group">${bGroups().map(g=>`<option ${g===r.bgroup?"selected":""}>${esc(g)}</option>`).join("")}</select>`;
   const selected = IMP.rows.filter(r => r.include);
   const html = Object.keys(sec).map(k => {
     const list = IMP.rows.map((r,i) => [r,i]).filter(([r]) => r.section === k); if (!list.length) return "";
-    const allOn = list.every(([r]) => r.include);
-    return `<details class="impsec" ${k==="rec"||k==="one"?"open":""}><summary><b>${sec[k][0]}</b> <span class="muted">${list.length}</span></summary>
+    const allOn = list.every(([r]) => r.include || r.dup);
+    return `<details class="impsec" open><summary><b>${sec[k][0]}</b> <span class="muted">${list.length}</span></summary>
       <div class="row" style="justify-content:space-between"><span class="sub">${sec[k][1]}</span><button type="button" class="btn ghost small" data-act="impall" data-sec="${k}" data-on="${allOn?0:1}">${allOn?"Untick all":"Tick all"}</button></div>
-      <div class="tablewrap"><table class="imp"><thead><tr><th></th><th>Name</th><th>Add as</th><th>Group</th><th>Category</th><th class="n">Amount</th><th>${k.startsWith("rec")?"Day":"Date"}</th></tr></thead><tbody>
+      <div class="tablewrap"><table class="imp"><thead><tr><th></th><th>Name</th><th>Add as</th><th>${k==="in"?"Tenant / group":"Group"}</th><th>${k==="in"?"For month / category":"Category"}</th><th class="n">Amount</th><th>${k==="rec"?"Day":"Date"}</th></tr></thead><tbody>
       ${list.map(([r,i]) => `<tr class="${r.include?"":"off"}"><td><input type="checkbox" data-ir="${i}" data-if="include" ${r.include?"checked":""} aria-label="Include ${esc(r.name)}"></td>
-        <td><input data-ir="${i}" data-if="name" value="${esc(r.name)}" style="width:170px" aria-label="Name"><div class="sub" title="${esc(r.desc)}">${esc(r.desc.slice(0,38))}${r.count>1?` · ${r.count} payments`:""}${r.section.startsWith("one")&&r.method&&r.method!=="Bank"?` · ${r.method}`:""}</div>${r.note?`<div class="sub" style="color:var(--warn)">${esc(r.note)}</div>`:""}</td>
+        <td><input data-ir="${i}" data-if="name" value="${esc(r.name)}" style="width:170px" aria-label="Name"><div class="sub" title="${esc(r.desc)}">${esc(r.desc.slice(0,38))}${r.count>1?` · ${r.count} payments`:""}${r.method&&r.method!=="Bank"?` · ${r.method}`:""}</div>${r.note?`<div class="sub" style="color:var(--warn)">${esc(r.note)}</div>`:""}</td>
         <td><select data-ir="${i}" data-if="type" aria-label="Add as">${typeOpts(r)}</select></td>
-        <td><select data-ir="${i}" data-if="bgroup" aria-label="Group">${bGroups().map(g=>`<option ${g===r.bgroup?"selected":""}>${esc(g)}</option>`).join("")}</select></td>
-        <td><select data-ir="${i}" data-if="bcat" aria-label="Category"><option value="">Choose…</option>${(r.bcat && !bCats(r.bgroup).includes(r.bcat) ? [r.bcat, ...bCats(r.bgroup)] : bCats(r.bgroup)).map(c=>`<option ${c===r.bcat?"selected":""}>${esc(c)}</option>`).join("")}</select></td>
+        ${r.type === "rent" ? `<td><select data-ir="${i}" data-if="tenantId" aria-label="Tenant">${tenantOptions(r.tenantId)}</select></td><td><input type="month" data-ir="${i}" data-if="rentMonth" value="${r.rentMonth}" aria-label="Rent for month"></td>`
+          : r.type === "income" ? `<td colspan="2" class="sub">Added to Money in each month</td>` : `<td>${grpSel(r,i)}</td><td>${catSel(r,i)}</td>`}
         <td class="n"><input class="amt" data-ir="${i}" data-if="amount" inputmode="decimal" value="${r.amount}" aria-label="Amount"></td>
         <td>${(r.type==="bill"||r.type==="income") ? `<input data-ir="${i}" data-if="day" inputmode="numeric" value="${r.day||""}" style="width:52px" aria-label="Day of month">` : `<span class="num">${fmtD(r.date)}</span>`}</td></tr>`).join("")}
       </tbody></table></div></details>`;
   }).join("");
-  const bills = selected.filter(r => r.type === "bill").reduce((a,r)=>a+num(r.amount),0);
-  const ones = selected.filter(r => r.type === "oneoff").reduce((a,r)=>a+num(r.amount),0);
-  $("#impOut").innerHTML = `<div class="banner">${IMP.tx.length} transactions from ${fmtD(IMP.from)} to ${fmtD(IMP.to)}. ${IMP.pdf ? (IMP.check === true ? `<b>✓ Totals match the statement</b> (paid out ${gbp(IMP.sumOut,1)}, paid in ${gbp(IMP.sumIn,1)}).` : IMP.check === false ? `<b>Check these:</b> read ${gbp(IMP.sumOut,1)} out and ${gbp(IMP.sumIn,1)} in, but the statement says ${gbp(IMP.summary.out,1)} and ${gbp(IMP.summary.inn,1)}.` : `Paid out ${gbp(IMP.sumOut,1)}, paid in ${gbp(IMP.sumIn,1)}.`) : `${IMP.cardStyle ? "Read as a credit card statement (spending shown as positive)." : ""} <button type="button" class="btn ghost small" data-act="impflip">${IMP.cardStyle ? "It's a bank account" : "It's a credit card statement"}</button>`}</div>
+  const sum = t => selected.filter(r => r.type === t).reduce((a,r)=>a+num(r.amount),0);
+  const rentN = selected.filter(r => r.type === "rent").length;
+  $("#impOut").innerHTML = `<div class="banner">${IMP.tx.length} transactions from ${fmtD(IMP.from)} to ${fmtD(IMP.to)}. ${IMP.pdf ? (IMP.check === true ? `<b>✓ Totals match the statement</b> (paid out ${gbp(IMP.sumOut,1)}, paid in ${gbp(IMP.sumIn,1)}).` : IMP.check === false ? `<b>Check these:</b> read ${gbp(IMP.sumOut,1)} out and ${gbp(IMP.sumIn,1)} in, but the statement says ${gbp(IMP.summary.out,1)} and ${gbp(IMP.summary.inn,1)}.` : `Paid out ${gbp(IMP.sumOut,1)}, paid in ${gbp(IMP.sumIn,1)}.`) : `${IMP.cardStyle ? "Read as a credit card statement (spending shown as positive)." : ""} <button type="button" class="btn ghost small" data-act="impflip">${IMP.cardStyle ? "It's a bank account" : "It's a credit card statement"}</button>`}${IMP.dups ? ` ${IMP.dups} already imported, so left unticked.` : ""}</div>
+    <div class="row"><label class="sub" for="impDef" style="font-weight:600">Spending on this account is mostly for</label><select id="impDef" class="input">${bGroups().map(g=>`<option ${g===IMP.defGroup?"selected":""}>${esc(g)}</option>`).join("")}</select><span class="sub">Changes the group for every payment out you haven't set yourself.</span></div>
     ${html}${datalists()}
     <div class="row" style="justify-content:space-between;position:sticky;bottom:0;background:var(--surface);padding-block:10px;border-top:1px solid var(--line)">
-      <span class="sub"><b>${selected.length}</b> selected · monthly bills ${gbp(bills)} · one-offs ${gbp(ones)}</span>
-      <div class="row"><button type="button" class="btn" data-act="close">Cancel</button><button type="button" class="btn primary" data-act="impsave" ${selected.length?"":"disabled"}>Add ${selected.length} to budget</button></div>
+      <span class="sub"><b>${selected.length}</b> selected · rent ${gbp(sum("rent"))} (${rentN}) · monthly bills ${gbp(sum("bill"))} · one-offs ${gbp(sum("oneoff"))}</span>
+      <div class="row"><button type="button" class="btn" data-act="close">Cancel</button><button type="button" class="btn primary" data-act="impsave" ${selected.length?"":"disabled"}>Add ${selected.length}</button></div>
     </div>`;
 }
 // ---------- PDF statements ----------
+// Reads a bank statement PDF (column layout: date · type · details · paid out · paid in · balance).
 // Reads a bank statement PDF (column layout: date · type · details · paid out · paid in · balance).
 async function parsePdfStatementDoc(doc) {
   const MON = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
@@ -2553,17 +2616,21 @@ async function parsePdfStatementDoc(doc) {
   for (let pn = 1; pn <= doc.numPages; pn++) {
     const page = await doc.getPage(pn);
     const tc = await page.getTextContent();
-    const items = tc.items.filter(i => i.str && i.str.trim()).map(i => ({ s: i.str.trim(), x: i.transform[4], y: i.transform[5], r: i.transform[4] + i.width }));
+    const items = tc.items.filter(i => i.str && i.str.trim() && !/^(\.|blank\.?)$/i.test(i.str.trim())).map(i => ({ s: i.str.trim().replace(/\s*\.$/, "").trim() || i.str.trim(), x: i.transform[4], y: i.transform[5], r: i.transform[4] + i.width }));
     const all = items.map(i => i.s).join(" ");
     const ym = all.match(/\b(20\d{2})\b/); if (ym && !fallbackYear) fallbackYear = +ym[1];
     // statement summary totals (for a cross-check), e.g. "Payments In £14,582.43"
     const lines0 = groupLines(items);
     for (const L of lines0) {
-      const label = norm(L.filter(i => !amtRe.test(i.s.replace(/^£/, ""))).map(i => i.s).join(""));
-      const amt = L.find(i => /\d\.\d{2}$/.test(i.s));
-      if (!amt) continue;
-      if (/^(total)?(payments|moneyin|paidin|deposits)in$|^paymentsin$|^moneyin$|^totalpaidin$|^totalmoneyin$|^totalcredits?$/.test(label) && summary.inn === undefined) summary.inn = toNum(amt.s);
-      if (/^(payments|money|paid)out$|^totalpaidout$|^totalmoneyout$|^totaldebits?$|^paymentsout$/.test(label) && summary.out === undefined) summary.out = toNum(amt.s);
+      let lastText = "";
+      for (const it of L) {
+        if (/^£?\d{1,3}(?:,\d{3})*\.\d{2}$/.test(it.s)) {
+          const label = norm(lastText).replace(/\./g, "");
+          if (/^(total)?(payments|money|paid)in$|^totalcredits?$|^paidin$/.test(label) && summary.inn === undefined) summary.inn = toNum(it.s);
+          if (/^(total)?(payments|money|paid)out$|^totaldebits?$|^paidout$/.test(label) && summary.out === undefined) summary.out = toNum(it.s);
+          lastText = "";
+        } else lastText = it.s;
+      }
     }
     // header row with the amount columns
     let hdr = null;
@@ -2571,10 +2638,10 @@ async function parsePdfStatementDoc(doc) {
       const n = L.map(i => ({ ...i, n: norm(i.s) }));
       const out = n.find(i => /(paid|money)out|withdrawn|debits?$|paymentsout/.test(i.n));
       const inn = n.find(i => /(paid|money)in$|paidin|moneyin|deposits?|credits?$|paymentsin/.test(i.n) && i !== out);
-      if (out && inn && n.some(i => /date/.test(i.n))) { const bal = n.find(i => /balance/.test(i.n)); hdr = { y: L[0].y, out: out.r, inn: inn.r, bal: bal ? bal.r : null, dateX: n.find(i => /date/.test(i.n)).x }; break; }
+      if (out && inn && n.some(i => /date/.test(i.n))) { const bal = n.find(i => /balance/.test(i.n)); const ty = n.find(i => /^type$/.test(i.n)); hdr = { y: L[0].y, out: out.r, inn: inn.r, bal: bal ? bal.r : null, dateX: n.find(i => /date/.test(i.n)).x, typeX: ty ? ty.x : null, labels: new Set(n.map(i => i.n).concat(["column"])) }; break; }
     }
     if (!hdr) continue;
-    const body = lines0.filter(L => L[0].y < hdr.y - 2);
+    const body = lines0.map(L => L.filter(i => !hdr.labels.has(norm(i.s)))).filter(L => L.length && L[0].y < hdr.y - 2);
     const cols = [["out", hdr.out], ["inn", hdr.inn]].concat(hdr.bal ? [["bal", hdr.bal]] : []);
     const leftOfAmounts = Math.min(hdr.out, hdr.inn) - 70;
     let cur = null;
@@ -2585,8 +2652,8 @@ async function parsePdfStatementDoc(doc) {
       if (dItem) lastDate = dateFrom(dItem.s);
       const amounts = L.filter(i => amtRe.test(i.s) && i.x > leftOfAmounts - 40);
       const words = L.filter(i => i !== dItem && !amounts.includes(i) && i.x < leftOfAmounts + 40);
-      const typeItem = words.find(i => /^([A-Z]{1,4}|\)\)\))$/.test(i.s) && words.indexOf(i) === 0 && words.length > 1);
-      if (typeItem) { cur = { type: typeItem.s, lines: [] }; }
+      const typeItem = hdr.typeX !== null ? words.find(i => Math.abs(i.x - hdr.typeX) < 14 && /^[A-Z]{2,4}$/.test(i.s)) : words.find(i => /^([A-Z]{1,4}|\)\)\))$/.test(i.s) && words.indexOf(i) === 0 && words.length > 1);
+      if (typeItem) { if (hdr.typeX !== null && cur && !cur.type) cur.type = typeItem.s; else cur = { type: typeItem.s, lines: cur && hdr.typeX !== null ? cur.lines : [] }; }
       const detail = words.filter(i => i !== typeItem).map(i => i.s).join(" ").trim();
       if (detail) { if (!cur) cur = { type: "", lines: [] }; cur.lines.push(detail); }
       let out = 0, inn = 0;
@@ -2596,8 +2663,7 @@ async function parsePdfStatementDoc(doc) {
         if (best === "out") out += toNum(a.s); else if (best === "inn") inn += toNum(a.s);
       }
       if ((out || inn) && lastDate) {
-        let lines = cur ? cur.lines : [];
-        if (lines.length > 1 && /^INT'?L\s*\d+/i.test(lines[0])) lines = lines.slice(1);
+        const lines = cur ? cur.lines : [];
         tx.push({ date: lastDate, desc: lines.join(" ").replace(/\s+/g, " ").trim() || "Payment", name: lines[0] || "", ref: lines.slice(1).join(" "), out, inn, type: cur ? cur.type : "" });
         cur = null;
       }
@@ -2628,6 +2694,13 @@ function loadPdfJs() {
   });
   return pdfLib;
 }
+function importStart(file, tx, extra) {
+  const dates = tx.map(t => t.date).sort();
+  const defGroup = defaultImportGroup(tx);
+  const rows = buildImportRows(tx, defGroup);
+  IMP = { file, tx, ...extra, from: dates[0], to: dates[dates.length-1], defGroup, rows, dups: rows.filter(r => r.dup).length };
+  importRender();
+}
 async function importLoadPdf(file) {
   $("#impOut").innerHTML = `<div class="banner">Reading ${esc(file.name)}…</div>`;
   try {
@@ -2635,9 +2708,7 @@ async function importLoadPdf(file) {
     const doc = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
     const r = await parsePdfStatementDoc(doc);
     if (!r.tx.length) throw new Error("No transactions found. This PDF layout isn't recognised yet; try the CSV download, or send the PDF to Claude to add support for it");
-    const dates = r.tx.map(t => t.date).sort();
-    IMP = { file, tx: r.tx, pdf: true, cardStyle: false, check: r.checked, summary: r.summary, sumOut: r.sumOut, sumIn: r.sumIn, from: dates[0], to: dates[dates.length-1], rows: buildImportRows(r.tx) };
-    importRender();
+    importStart(file, r.tx, { pdf: true, cardStyle: false, check: r.checked, summary: r.summary, sumOut: r.sumOut, sumIn: r.sumIn });
   } catch (err) {
     console.error(err);
     $("#impOut").innerHTML = `<div class="banner bad">Couldn't read that PDF: ${esc(err.message || "unknown problem")}.</div>`;
@@ -2648,40 +2719,62 @@ async function importLoad(file, flip) {
     const text = await file.text();
     const { tx, cardStyle } = parseStatement(text, flip);
     if (!tx.length) throw new Error("No transactions found");
-    const dates = tx.map(t => t.date).sort();
-    IMP = { file, tx, cardStyle, from: dates[0], to: dates[dates.length-1], rows: buildImportRows(tx) };
-    importRender();
+    importStart(file, tx, { cardStyle });
   } catch (err) {
-    $("#impOut").innerHTML = `<div class="banner bad">Couldn't read that file: ${esc(err.message||"unknown problem")}. Make sure it's the CSV download (not PDF) and has Date, Description and Amount columns.</div>`;
+    $("#impOut").innerHTML = `<div class="banner bad">Couldn't read that file: ${esc(err.message||"unknown problem")}. Make sure it's the PDF or CSV download and has Date, Description and Amount columns.</div>`;
   }
 }
 async function importSave() {
   if (!IMP) return;
   const sel = IMP.rows.filter(r => r.include && num(r.amount));
+  const noTenant = sel.filter(r => r.type === "rent" && !r.tenantId);
+  if (noTenant.length) { toast(`Choose the tenant for ${noTenant.length} rent payment${noTenant.length>1?"s":""}, or untick ${noTenant.length>1?"them":"it"}`); return; }
   const btn = document.querySelector('[data-act="impsave"]'); if (btn) { btn.disabled = true; btn.textContent = "Adding…"; }
-  let n = 0;
+  let n = 0, rentN = 0;
+  // remember payers and payees for next time
+  const payerMap = { ...(S.settings.payerMap || {}) }, payeeMap = { ...(S.settings.payeeMap || {}) };
+  // 1. rent -> Rent tab
+  for (const r of sel.filter(r => r.type === "rent")) {
+    const t = byId("tenancies", r.tenantId); if (!t) continue;
+    const mk = r.rentMonth || r.date.slice(0,7);
+    const prev = rentFor(t.id, mk) || {};
+    if ((prev.bankTx || []).includes(r.key)) continue;
+    const d = { tenancyId: t.id, propertyId: t.propertyId, month: mk, due: has(prev.due) ? num(prev.due) : num(t.rent),
+      received: Math.round((num(prev.received) + num(r.amount)) * 100) / 100, method: "Bank", date: r.date, note: prev.note || "", bankTx: [...(prev.bankTx || []), r.key] };
+    if (await save("rent", rentDocId(t.id, mk), d)) { n++; rentN++; }
+    payerMap[merchantKey(r.desc)] = t.id;
+  }
+  // 2. regular bills and income -> Monthly budget
   for (const r of sel.filter(r => r.type === "bill" || r.type === "income")) {
     const ok = await save("budget", null, { label: r.name.trim() || "Payment", type: r.type === "income" ? "income" : "expense", group: r.type === "income" ? "Salaries" : r.bgroup, bgroup: r.type === "income" ? "" : r.bgroup, bcat: r.type === "income" ? "" : r.bcat, amount: num(r.amount), day: num(r.day) || "", method: r.type === "income" ? "Salary" : "Direct debit", propertyId: r.type === "income" ? "" : propertyOfGroup(r.bgroup), varies: r.varies ? "yes" : "", startMonth: IMP.from.slice(0,7), endMonth: "", notes: `From statement: ${r.desc}` });
     if (ok) n++;
+    if (r.type === "bill") payeeMap[merchantKey(r.desc)] = { g: r.bgroup, c: r.bcat };
   }
+  // 3. one-offs -> that month's one-offs
   const byMonth = {};
   for (const r of sel.filter(r => r.type === "oneoff" || r.type === "oneoffin")) (byMonth[r.date.slice(0,7)] = byMonth[r.date.slice(0,7)] || []).push(r);
   for (const [mk, list] of Object.entries(byMonth)) {
     const cur = (S.months.find(m => m.id === mk) || {}).oneoffs || [];
-    const add = list.map((r, j) => ({ id: Date.now().toString(36) + j, label: r.name.trim() || "Payment", amount: num(r.amount), kind: r.type === "oneoffin" ? "in" : "out", date: r.date, bgroup: r.bgroup, bcat: r.bcat, cat: r.bcat, propertyId: propertyOfGroup(r.bgroup), method: IMP.cardStyle ? "Card" : (r.method || "Bank"), reason: r.ref || "" }));
-    if (await saveMonth(mk, { oneoffs: [...cur, ...add] })) n += list.length;
+    const have = new Set(cur.map(o => o.srcKey).filter(Boolean));
+    const add = list.filter(r => !have.has(r.key)).map((r, j) => ({ id: Date.now().toString(36) + j, srcKey: r.key, label: r.name.trim() || "Payment", amount: num(r.amount), kind: r.type === "oneoffin" ? "in" : "out", date: r.date, bgroup: r.bgroup, bcat: r.bcat, cat: r.bcat, propertyId: propertyOfGroup(r.bgroup), method: IMP.cardStyle ? "Card" : (r.method || "Bank"), reason: r.ref || "" }));
+    if (add.length && await saveMonth(mk, { oneoffs: [...cur, ...add] })) n += add.length;
+    for (const r of list) if (r.type === "oneoff" && r.bcat) payeeMap[merchantKey(r.desc)] = { g: r.bgroup, c: r.bcat };
   }
-  closeModal(); toast(`Added ${n} item${n===1?"":"s"} to your budget`);
+  await saveSettings({ payerMap, payeeMap });
+  closeModal(); toast(`Added ${n} item${n===1?"":"s"}${rentN ? `, including ${rentN} rent payment${rentN>1?"s":""}` : ""}`);
 }
 document.addEventListener("change", async (e) => {
   const el = e.target;
   if (el.id === "impFile" && el.files && el.files[0]) { const f = el.files[0]; return /\.pdf$/i.test(f.name) || f.type === "application/pdf" ? importLoadPdf(f) : importLoad(f); }
+  if (el.id === "impDef" && IMP) { IMP.defGroup = el.value; for (const r of IMP.rows) if (r.section !== "in" && !r.touched && !r.remembered && !r.propertyId) { r.bgroup = el.value; r.bcat = mapCat(r.bgroup, r.group, r.name + " " + r.desc, r.section === "rec"); } return importRender(); }
   if (el.dataset && el.dataset.ir !== undefined && IMP) {
     const r = IMP.rows[+el.dataset.ir]; const f = el.dataset.if;
     r[f] = el.type === "checkbox" ? el.checked : el.value;
+    if (f === "bgroup" || f === "bcat") r.touched = true;
     if (f === "bgroup") { r.bcat = mapCat(r.bgroup, r.bcat, r.name + " " + r.desc, r.type === "bill"); importRender(); }
-    if (f === "type" || f === "include") importRender();
-    else if (f === "amount") importRender();
+    if (f === "tenantId") { if (r.tenantId) { r.rentMonth = rentMonthFor(r.tenantId, r.date); r.include = true; } importRender(); }
+    if (f === "type") { if (r.type === "rent" && r.tenantId) r.rentMonth = rentMonthFor(r.tenantId, r.date); if (r.type !== "rent" && !r.bgroup) r.bgroup = IMP.defGroup; importRender(); }
+    else if (f === "include" || f === "amount") importRender();
   }
 });
 
