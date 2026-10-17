@@ -2040,6 +2040,9 @@ document.addEventListener("click", async (e) => {
   if (act === "dupd") { const ok = await patch("documents", b.dataset.id, { name: $("#deName").value.trim(), cat: $("#deCat").value, link: $("#deLink").value, expiry: $("#deExp").value, notes: $("#deNotes").value.trim() }); if (ok) { closeModal(); toast("Saved"); } return; }
   if (act === "ddel") { if (b.dataset.armed) return docDelete(b.dataset.id); b.dataset.armed = "1"; b.textContent = "Tap again to delete"; return; }
   if (act === "quick-open") return quickOpen();
+  if (act === "askex") { $("#qText").value = b.dataset.q; return askRun(b.dataset.q); }
+  if (act === "asksay") return askSpeak($("#qOut").dataset.say || "");
+  if (act === "askgo") { closeModal(); return setTab(b.dataset.tab); }
   if (act === "esave") return quickExpenseSave();
   if (act === "import-open") return importOpen();
   if (act === "impsave") return importSave();
@@ -2221,18 +2224,18 @@ function parseQuick(text) {
 }
 let qState = null, qRec = null;
 function quickOpen() {
-  if (!canWrite) { toast("You can view this page but not change it"); return; }
-  qState = null;
+  qState = null; askVoice = false;
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   $("#modalRoot").innerHTML = `<div class="scrim" id="scrim"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="qTitle">
-    <header><h2 id="qTitle">Quick add</h2><button class="btn ghost" data-act="close" aria-label="Close">✕</button></header>
+    <header><h2 id="qTitle">Ask or add</h2><button class="btn ghost" data-act="close" aria-label="Close">✕</button></header>
     <form id="qForm" style="padding:16px 18px;display:flex;flex-direction:column;gap:12px" novalidate>
-      <p class="sub" style="margin:0">Say or type a rent payment, a bill or a spend. For example: <i>“Room 7 paid in cash on the 5th of October”</i>, <i>“British Gas for the HMO £85 every month on the 1st”</i> or <i>“Boiler repair at the HMO £120 yesterday”</i>.</p>
+      <p class="sub" style="margin:0"><b>Ask a question</b> about your figures, like <i>“What's coming up next?”</i>, <i>“Show rent history for room 3”</i> or <i>“How much have I spent on Nene Gardens this year?”</i></p>
+      <p class="sub" style="margin:0"><b>Or add something:</b> <i>“Room 7 paid in cash on the 5th of October”</i>, <i>“British Gas for the HMO £85 every month on the 1st”</i> or <i>“Boiler repair at the HMO £120 yesterday”</i>.</p>
       <div class="row" style="flex-wrap:nowrap">
-        <input class="input" id="qText" autocomplete="off" placeholder="Room 7 paid in cash on 5 October" style="flex:1;min-width:0;padding:10px;font-size:15px">
+        <input class="input" id="qText" autocomplete="off" placeholder="Ask a question, or add rent or a spend" style="flex:1;min-width:0;padding:10px;font-size:15px">
         ${SR?`<button type="button" class="btn mic" id="qMic" data-act="qmic" aria-label="Speak">${MIC_SVG}<span>Speak</span></button>`:""}
       </div>
-      <div id="qOut"></div>
+      <div id="qOut">${askHelp().html}</div>
       ${SR?"":`<p class="sub" style="margin:0">Tip: on a phone, tap the microphone on your keyboard to speak instead of typing.</p>`}
     </form></div></div>`;
   setTimeout(() => $("#qText") && $("#qText").focus(), 40);
@@ -2246,11 +2249,14 @@ function quickListen() {
   let finalText = "";
   qRec.onresult = (e) => { let t = ""; for (const r of e.results) t += r[0].transcript; $("#qText").value = t; if (e.results[e.results.length-1].isFinal) finalText = t; };
   qRec.onerror = (e) => { toast(e.error === "not-allowed" ? "Microphone blocked. Allow it in your browser settings, or type instead." : "Didn't catch that. Try again or type it."); };
-  qRec.onend = () => { qRec = null; const b = $("#qMic"); if (b) { b.classList.remove("on"); b.querySelector("span").textContent = "Speak"; } if ((finalText || $("#qText").value).trim()) quickParse(); };
+  qRec.onend = () => { qRec = null; const b = $("#qMic"); if (b) { b.classList.remove("on"); b.querySelector("span").textContent = "Speak"; } if ((finalText || $("#qText").value).trim()) { askVoice = true; quickParse(); } };
   try { qRec.start(); } catch (e) { qRec = null; btn.classList.remove("on"); }
 }
 function quickParse() {
   const text = $("#qText").value.trim(); if (!text) return;
+  delete $("#qOut").dataset.say;
+  if (isQuestion(text)) return askRun(text);
+  if (!canWrite) { $("#qOut").innerHTML = `<div class="banner">You can ask questions here, but not add or change anything.</div>`; return; }
   const r = parseQuick(text); qState = r;
   const out = $("#qOut");
   if ((r.expenseish && !r.rentish) || (!r.tenants.length && r.amount !== null)) return quickExpenseForm(parseExpense(text));
@@ -2304,12 +2310,273 @@ document.addEventListener("change", (e) => {
   if (e.target.id === "qMonth") quickFill($("#qTen").value, false);
 });
 document.addEventListener("submit", (e) => { if (e.target.id === "qForm") { e.preventDefault(); quickParse(); } });
+document.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.id === "qText") { e.preventDefault(); quickParse(); } });
 (function addQuickButton() {
   const b = document.createElement("button");
-  b.className = "fab"; b.type = "button"; b.dataset.act = "quick-open"; b.setAttribute("aria-label", "Quick add rent, bills or spending by voice or text");
-  b.innerHTML = `${MIC_SVG}<span>Quick add</span>`;
+  b.className = "fab"; b.type = "button"; b.dataset.act = "quick-open"; b.setAttribute("aria-label", "Ask a question or add rent, bills or spending, by voice or text");
+  b.innerHTML = `${MIC_SVG}<span>Ask or add</span>`;
   document.body.appendChild(b);
 })();
+
+// ---------- Ask: answers questions from your own figures. Runs in this browser; nothing is sent anywhere. ----------
+const ASK_START = /^\s*(what|whats|how|when|who|whos|which|where|show|list|tell|give|is|are|did|do|does|have|has|can|any|history|total|summary|summarise|summarize|breakdown|find|spending|expenses|expenditure|outgoings|rent history|net worth|deposits?|upcoming|overdue|anything)\b/i;
+const ASK_PHRASE = /\b(how much|how many|history|show me|what is|what are|when is|when does|when do|who owes|coming up|expiring|expire|expires|due soon|upcoming|net worth|breakdown|in total|so far)\b/i;
+function isQuestion(text) {
+  const s = String(text).trim();
+  if (/\?\s*$/.test(s) || ASK_START.test(s)) return true;
+  if (/£\s?\d|\d\s?(pounds|quid)\b/i.test(s)) return false;          // has an amount: it's something to add
+  if (/\b((last|this|past|previous) (month|year|tax year|\d+ months)|so far|since|in total|altogether|totals?)\b/i.test(s) && !/\bon (the )?\d|\b(today|yesterday)\b/i.test(s)) return true;  // a period, not a date: asking
+  return ASK_PHRASE.test(s);
+}
+const ASK_GENERIC = new Set(["gardens","garden","court","place","road","street","house","residence","close","lane","flat","the","avenue","drive","way"]);
+const monthsIn = (from, to) => { const out = []; for (let k = from; k <= to && out.length < 240; k = addMonths(k, 1)) out.push(k); return out; };
+function askTrackStart() {
+  const ks = [...S.months.filter(m => (m.oneoffs || []).length || Object.keys(m.overrides || {}).length).map(m => m.id),
+    ...S.rent.filter(r => num(r.received)).map(r => r.month || String(r.id).slice(-7))].filter(k => /^\d{4}-\d{2}$/.test(k)).sort();
+  return ks[0] || monthKey(new Date());
+}
+// "this tax year", "last month", "in September", "since April", "last 6 months", "2025", "so far" …
+function askPeriod(s, def) {
+  const now = new Date(), cur = monthKey(now);
+  const ty = (now.getMonth() > 3 || (now.getMonth() === 3 && now.getDate() >= 6)) ? now.getFullYear() : now.getFullYear() - 1;
+  const P = (from, to, label, explicit = true) => ({ from, to: to > cur ? cur : to, label, explicit });
+  let m;
+  if (/\b(last|previous) tax year\b/.test(s)) return P(`${ty-1}-04`, `${ty}-03`, `the ${ty-1}/${String(ty).slice(2)} tax year`);
+  if (/\btax year\b/.test(s)) return P(`${ty}-04`, cur, `this tax year (since April ${ty})`);
+  if (/\bthis month\b/.test(s)) return P(cur, cur, monthLabel(cur));
+  if (/\blast month\b/.test(s)) { const k = addMonths(cur, -1); return P(k, k, monthLabel(k)); }
+  if ((m = s.match(/\b(?:last|past|previous)\s+(\d{1,2})\s+months?\b/))) return P(addMonths(cur, 1 - +m[1]), cur, `the last ${m[1]} months`);
+  if (/\b(last|past) (12 months|year)\b/.test(s) && /\bpast\b|12 months/.test(s)) return P(addMonths(cur, -11), cur, "the last 12 months");
+  if (/\bthis year\b/.test(s)) return P(`${now.getFullYear()}-01`, cur, `${now.getFullYear()} so far`);
+  if (/\blast year\b/.test(s)) return P(`${now.getFullYear()-1}-01`, `${now.getFullYear()-1}-12`, String(now.getFullYear()-1));
+  if (/\b(ever|all time|altogether|since (we|i) started|in total)\b/.test(s)) return P("2000-01", cur, "since your records start");
+  if ((m = s.match(new RegExp(`\\bsince\\s+${QMRE}\\b(?:\\s+(20\\d\\d))?`)))) { const mi = qMonthIdx(m[1]); const y = m[2] ? +m[2] : qYearFor(mi, 1); const k = monthKey(new Date(y, mi, 1)); return P(k, cur, `since ${monthLabel(k)}`); }
+  if ((m = s.match(new RegExp(`\\b${QMRE}\\b(?:\\s+(20\\d\\d))?`))) && !(m[1] === "may" && /\bmay (i|we|you)\b/.test(s))) { const mi = qMonthIdx(m[1]); const y = m[2] ? +m[2] : qYearFor(mi, 1); const k = monthKey(new Date(y, mi, 1)); return P(k, k, monthLabel(k)); }
+  if ((m = s.match(/\b(?:in|for|during)\s+(20\d\d)\b/))) return P(`${m[1]}-01`, `${m[1]}-12`, m[1]);
+  return def === "all" ? P("2000-01", cur, "since your records start", false) : P(`${ty}-04`, cur, `this tax year (since April ${ty})`, false);
+}
+// clip a period to the months you've actually been recording, so bills aren't counted for months before you started
+function askClip(p) { const st = askTrackStart(); const from = p.from < st ? st : p.from; return { ...p, from, clipped: from !== p.from, start: st, months: from <= p.to ? monthsIn(from, p.to) : [] }; }
+function askGroups(s) {
+  const hits = []; const add = g => { if (g && !hits.includes(g)) hits.push(g); };
+  for (const g of bGroups()) if (g.toLowerCase().split(/\s+/).filter(w => w.length >= 4 && !ASK_GENERIC.has(w)).some(w => s.includes(" " + w))) add(g);
+  for (const p of S.properties) if (String(p.name || "").toLowerCase().split(/\s+/).filter(w => w.length >= 3 && !ASK_GENERIC.has(w) && !/^\d+$/.test(w)).some(w => s.includes(" " + w + " ") || s.includes(" " + w + "s "))) add(groupOfProperty(p.id));
+  if (/\bhmo\b/.test(s)) S.properties.filter(p => p.kind === "HMO").forEach(p => add(groupOfProperty(p.id)));
+  if (/\b(flat|single let)\b/.test(s)) S.properties.filter(p => /single/i.test(p.kind || "")).forEach(p => add(groupOfProperty(p.id)));
+  if (/\b(home|our house|household|personal)\b/.test(s)) add(homeGroup());
+  if (!hits.length && /\b(rentals?|rental properties|lets|buy to let|btl)\b/.test(s)) bGroups().filter(g => g !== homeGroup()).forEach(add);
+  return hits;
+}
+const ASK_CAT_SYN = [[/\b(kids|school|nursery)\b/, "Children"], [/\b(food|supermarket|grocery|shopping)\b/, "Groceries"], [/\b(energy|gas|electric|electricity|water|broadband|internet)\b/, "Utilities"],
+  [/\b(amex|american express|credit cards?)\b/, "Credit cards"], [/\b(mortgages?)\b/, "Mortgage"], [/\b(cars?|fuel|petrol|diesel|parking)\b/, "Car"], [/\b(india|indian)\b/, "India commitment"],
+  [/\b(fixes|fixing|plumber|electrician|handyman)\b/, "Repairs & maintenance"], [/\b(cleaner)\b/, "Cleaning"], [/\b(loans?|finance)\b/, "Loans & finances"], [/\b(netflix|spotify|streaming)\b/, "Subscriptions"],
+  [/\b(haircut|hair|beauty|barber)\b/, "Grooming"], [/\b(eating out|restaurants?|takeaways?|cinema|holiday)\b/, "Entertainment"]];
+function askCats(s) {
+  const all = new Set(["Mortgage", "Loans & finances", "Uncategorised"]); bGroups().forEach(g => bCats(g).forEach(c => all.add(c)));
+  const scored = [];
+  for (const c of all) {
+    const stems = c.toLowerCase().replace(/&/g, " ").split(/[\s,]+/).filter(w => w.length >= 4 && !["and", "direct", "rent", "ground", "charge"].includes(w)).map(w => w.length > 5 ? w.replace(/(ies|es|s)$/, "") : w);
+    const n = stems.filter(w => s.includes(" " + w)).length; if (n) scored.push([c, n]);
+  }
+  if (/\bground rent|service charge\b/.test(s)) scored.push(["Service charge & ground rent", 3]);
+  if (/\bcouncil tax\b/.test(s)) scored.push(["Council tax", 3]);
+  if (!scored.length) for (const [re, c] of ASK_CAT_SYN) if (re.test(s) && all.has(c)) scored.push([c, 1]);
+  const best = Math.max(0, ...scored.map(x => x[1]));
+  return [...new Set(scored.filter(x => x[1] === best).map(x => x[0]))];
+}
+function askSpendItems(mk) {
+  const B = budgetFor(mk); const out = [];
+  for (const l of B.out) { const k = classify(l, true); out.push({ g: k.g, c: k.c || "Uncategorised", label: l.label, v: B.amt(l), mk, kind: "regular" }); }
+  for (const m of B.morts) out.push({ g: groupOfProperty(m.id) || homeGroup(), c: "Mortgage", label: m.label, v: m.amount, mk, kind: "mortgage" });
+  for (const d of B.loans) out.push({ g: homeGroup(), c: "Loans & finances", label: d.label, v: d.amount, mk, kind: "loan" });
+  for (const o of B.oneoffs.filter(o => o.kind !== "in")) { const k = classify(o, false); out.push({ g: k.g, c: k.c || "Uncategorised", label: o.label || "One-off", v: num(o.amount), mk, kind: "one-off", date: o.date }); }
+  return out;
+}
+function askTenants(s) {
+  const props = S.properties.filter(p => String(p.name || "").toLowerCase().split(/\s+/).filter(w => w.length >= 3 && !ASK_GENERIC.has(w) && !/^\d+$/.test(w)).some(w => s.includes(" " + w)) || (/\bhmo\b/.test(s) && p.kind === "HMO"));
+  let pool = S.tenancies.slice();
+  const rm = s.match(/\broom\s*(?:number\s*)?(\d{1,2})\b/);
+  if (rm) { pool = pool.filter(t => (String(t.room || "").match(/\d+/) || [])[0] == rm[1]); if (props.length) pool = pool.filter(t => props.some(p => p.id === t.propertyId)); }
+  const score = t => String(t.tenantName || "").toLowerCase().split(/[\s,&]+/).filter(w => w.length >= 3 && !["and", "the", "mrs", "miss"].includes(w)).filter(w => s.includes(" " + w + " ") || s.includes(" " + w + "s ")).length;
+  const best = Math.max(0, ...pool.map(score));
+  if (best) pool = pool.filter(t => score(t) === best); else if (!rm) pool = [];
+  const cur = pool.filter(isCurrent);
+  return cur.length ? cur : pool;
+}
+function rentSplit(r) {
+  const got = num(r.received), bank = r.method === "Cash" ? Math.min(num(r.bankSum), got) : got;
+  return { got, bank, cash: Math.round((got - bank) * 100) / 100 };
+}
+const askTable = (head, rows, foot) => `<div class="tablewrap" style="max-height:340px;overflow:auto"><table><thead><tr>${head.map(h => `<th${/^£|n:/.test(h) ? ' class="n"' : ""}>${esc(h.replace(/^(n:|£)/, ""))}</th>`).join("")}</tr></thead><tbody>${rows.map(r => `<tr>${r.map((c, i) => `<td${/^£|n:/.test(head[i]) ? ' class="n num"' : ""}>${c}</td>`).join("")}</tr>`).join("")}</tbody>${foot ? `<tfoot><tr>${foot.map((c, i) => `<td${/^£|n:/.test(head[i]) ? ' class="n num"' : ""}><b>${c}</b></td>`).join("")}</tr></tfoot>` : ""}</table></div>`;
+const askGo = (tabName, label) => `<button type="button" class="btn ghost small" data-act="askgo" data-tab="${tabName}">${label} →</button>`;
+const g0 = v => gbp(v, Math.round(v * 100) % 100 ? 1 : 0);
+const plainMoney = v => v < 0 ? "minus " + plainMoney(-v) : (Math.round(v * 100) % 100 ? "£" + Number(v).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "£" + Math.round(v).toLocaleString("en-GB"));
+const inP = l => /^since/.test(l) ? l : "in " + l;
+const clipNote = p => p.clipped ? `<div class="sub">Your records start in ${monthLabel(p.start)}, so earlier months aren't included.</div>` : "";
+
+function askRentHistory(t, s) {
+  const p = byId("properties", t.propertyId) || {};
+  const recs = S.rent.filter(r => r.tenancyId === t.id && num(r.received)).map(r => r.month || String(r.id).slice(-7)).sort();
+  const first = recs[0] || askTrackStart();
+  const per = askPeriod(s, "all"); const from = per.from < first ? first : per.from;
+  const months = monthsIn(from, per.to).filter(mk => tenancyActiveIn(t, mk) || rentFor(t.id, mk));
+  let due = 0, got = 0, bank = 0, cash = 0, owed = 0;
+  const rows = months.map(mk => {
+    const r = rentFor(t.id, mk) || {}; const st = rentStatus(t, mk, rentFor(t.id, mk));
+    const d = has(r.due) ? num(r.due) : num(t.rent); const sp = rentSplit(r);
+    due += d; got += sp.got; bank += sp.bank; cash += sp.cash; if (st === "late" || st === "part") owed += Math.max(d - sp.got, 0);
+    return [esc(monthLabel(mk)), g0(d), sp.got ? g0(sp.got) : "—", sp.bank ? g0(sp.bank) : "—", sp.cash ? g0(sp.cash) : "—", r.date ? fmtD(r.date) : "", STATUS_CHIP[st] || ""];
+  }).reverse();
+  const who = `${t.tenantName}${t.room ? ` (${t.room}, ${p.name || ""})` : p.name ? ` (${p.name})` : ""}`;
+  const say = months.length ? `${t.tenantName} has paid ${plainMoney(got)} over ${months.length} month${months.length > 1 ? "s" : ""}${per.explicit ? ` ${inP(per.label)}` : ""}: ${plainMoney(bank)} by bank and ${plainMoney(cash)} in cash. ${owed > 0 ? `${plainMoney(owed)} is outstanding.` : "Nothing is outstanding."}` : `I can't find any rent recorded for ${t.tenantName}${per.explicit ? ` ${inP(per.label)}` : ""}.`;
+  return { say, html: `<h3 style="margin:0">Rent history: ${esc(who)}</h3><p style="margin:0">${esc(say)}</p>${months.length ? askTable(["Month", "£Due", "£Received", "£Bank", "£Cash", "Date", "Status"], rows, ["Total", g0(due), g0(got), g0(bank), g0(cash), "", ""]) : ""}<div class="row">${askGo("rent", "Open Rent")}${askGo("reports", "Rent report")}</div>` };
+}
+function askRentCollected(s) {
+  const per = askClip(askPeriod(s)); const gs = askGroups(s);
+  const props = S.properties.filter(p => !/^Home/.test(p.kind || "") && (!gs.length || gs.includes(groupOfProperty(p.id))));
+  let T = { due: 0, got: 0, bank: 0, cash: 0 };
+  const rows = props.map(p => {
+    const x = { due: 0, got: 0, bank: 0, cash: 0 };
+    for (const mk of per.months) for (const t of S.tenancies.filter(t => t.propertyId === p.id)) {
+      const r = rentFor(t.id, mk); if (!tenancyActiveIn(t, mk) && !r) continue;
+      x.due += r && has(r.due) ? num(r.due) : (tenancyActiveIn(t, mk) ? num(t.rent) : 0);
+      if (r) { const sp = rentSplit(r); x.got += sp.got; x.bank += sp.bank; x.cash += sp.cash; }
+    }
+    for (const k in T) T[k] += x[k];
+    return [esc(p.name), g0(x.due), g0(x.got), g0(x.bank), g0(x.cash)];
+  });
+  const where = gs.length === 1 ? ` from ${gs[0]}` : "";
+  const say = per.months.length ? `You collected ${plainMoney(T.got)} in rent${where} ${inP(per.label)}: ${plainMoney(T.bank)} by bank and ${plainMoney(T.cash)} in cash${T.due > T.got ? `, against ${plainMoney(T.due)} due` : ""}.` : `There's no rent recorded for ${per.label}.`;
+  return { say, html: `<h3 style="margin:0">Rent collected${esc(where)}, ${esc(per.label)}</h3><p style="margin:0">${esc(say)}</p>${props.length > 1 || per.months.length ? askTable(["Property", "£Due", "£Collected", "£Bank", "£Cash"], rows, props.length > 1 ? ["Total", g0(T.due), g0(T.got), g0(T.bank), g0(T.cash)] : null) : ""}${clipNote(per)}<div class="row">${askGo("reports", "Rent report")}</div>` };
+}
+function askArrears() {
+  const cur = monthKey(new Date()); const st0 = askTrackStart(); const rows = []; let tot = 0;
+  for (const t of S.tenancies.filter(isCurrent)) {
+    const recs = S.rent.filter(r => r.tenancyId === t.id).map(r => r.month || String(r.id).slice(-7)).sort();
+    const from = recs[0] || st0; let owed = 0, n = 0;
+    for (const mk of monthsIn(from, cur)) { if (!tenancyActiveIn(t, mk)) continue; const r = rentFor(t.id, mk); const st = rentStatus(t, mk, r); if (st === "late" || st === "part") { owed += Math.max((r && has(r.due) ? num(r.due) : num(t.rent)) - (r ? num(r.received) : 0), 0); n++; } }
+    if (owed > 0) { tot += owed; rows.push([esc(t.tenantName), esc(`${(byId("properties", t.propertyId) || {}).name || ""}${t.room ? " · " + t.room : ""}`), `n:${n}`, g0(owed)]); }
+  }
+  const say = rows.length ? `${rows.length} tenant${rows.length > 1 ? "s owe" : " owes"} ${plainMoney(tot)} in total.` : "Nobody owes any rent. Everyone is up to date.";
+  return { say, html: `<h3 style="margin:0">Rent owed</h3><p style="margin:0">${esc(say)}</p>${rows.length ? askTable(["Tenant", "Property", "n:Months", "£Owed"], rows.map(r => [r[0], r[1], r[2].slice(2), r[3]])) : ""}<div class="row">${askGo("rent", "Open Rent")}</div>` };
+}
+function askSpend(s) {
+  const per = askClip(askPeriod(s)); const gs = askGroups(s);
+  const noMort = /\b(excluding|without|apart from|not including|except|other than)\b[^.]*\bmortgages?\b/.test(s);
+  const sx = noMort ? s.replace(/\bmortgages?\b/g, " ") : s;
+  let cats = askCats(sx);
+  let items = per.months.flatMap(askSpendItems);
+  if (gs.length) items = items.filter(i => gs.includes(i.g));
+  let term = "";
+  if (cats.length) { items = items.filter(i => cats.includes(i.c)); term = cats.join(" / "); }
+  else {
+    // a named payee, e.g. "Octopus" or "Thames Water"
+    const skip = new Set([...bGroups().join(" ").toLowerCase().split(/\s+/), ...S.properties.flatMap(p => String(p.name || "").toLowerCase().split(/\s+/)), "spent", "spend", "much", "have", "this", "that", "year", "month", "with", "from", "on", "what", "total", "bills", "money", "much"]);
+    const words = [...new Set(items.flatMap(i => String(i.label).toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/)))].filter(w => w.length >= 4 && !skip.has(w) && sx.includes(" " + w));
+    if (words.length) { items = items.filter(i => words.some(w => String(i.label).toLowerCase().includes(w))); term = words.join(" "); }
+  }
+  if (noMort) items = items.filter(i => i.c !== "Mortgage");
+  const tot = items.reduce((a, i) => a + i.v, 0);
+  const what = [term ? "on " + (cats.length ? term.toLowerCase() : term) : "", noMort ? "excluding mortgages" : "", gs.length === 1 ? `at ${gs[0]}` : gs.length > 1 ? `across ${gs.join(", ")}` : ""].filter(Boolean).join(" ") || "in total";
+  const byCat = {}; items.forEach(i => byCat[i.c] = (byCat[i.c] || 0) + i.v);
+  const byMonth = {}; items.forEach(i => byMonth[i.mk] = (byMonth[i.mk] || 0) + i.v);
+  const byItem = {}; items.forEach(i => { const k = i.label + "|" + i.kind; (byItem[k] = byItem[k] || { label: i.label, kind: i.kind, c: i.c, g: i.g, v: 0, n: 0 }); byItem[k].v += i.v; byItem[k].n++; });
+  const mort = byCat["Mortgage"] || 0;
+  const say = per.months.length ? `You've spent ${plainMoney(tot)} ${what} ${inP(per.label)}${mort && !cats.includes("Mortgage") ? `, of which ${plainMoney(mort)} is mortgage` : ""}.` : `Nothing is recorded for ${per.label}.`;
+  const catRows = Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([c, v]) => [esc(c), g0(v)]);
+  const itemRows = Object.values(byItem).sort((a, b) => b.v - a.v).slice(0, 40).map(i => [esc(i.label), `<span class="sub">${esc(i.kind)}${gs.length === 1 ? "" : " · " + esc(i.g)}</span>`, esc(i.c), g0(i.v)]);
+  const monthRows = Object.entries(byMonth).sort().map(([k, v]) => [esc(monthLabel(k)), g0(v)]);
+  return { say, html: `<h3 style="margin:0">Spending${what === "in total" ? "" : " " + esc(what)}, ${esc(per.label)}</h3><p style="margin:0">${esc(say)}</p>
+    ${!cats.length && !term && catRows.length > 1 ? `<details open><summary class="sub" style="cursor:pointer">By category</summary>${askTable(["Category", "£Amount"], catRows)}</details>` : ""}
+    ${itemRows.length ? `<details ${cats.length || term ? "open" : ""}><summary class="sub" style="cursor:pointer">What it was (${itemRows.length})</summary>${askTable(["Item", "Type", "Category", "£Amount"], itemRows)}</details>` : ""}
+    ${monthRows.length > 1 ? `<details><summary class="sub" style="cursor:pointer">By month</summary>${askTable(["Month", "£Amount"], monthRows)}</details>` : ""}
+    <div class="sub">Regular bills and mortgages are counted for every month they're set up; one-offs on the date they were paid.</div>${clipNote(per)}<div class="row">${askGo("budget", "Open Monthly budget")}</div>` };
+}
+const ASK_DATE_KEYS = [[/\bgas\b/, /gas/i], [/\b(eicr|electrical|electric)\b/, /eicr|electric/i], [/\bepc\b|energy performance/, /epc|energy perf/i], [/\blicen[cs]e/, /licen/i], [/\bfire\b/, /fire|alarm|smoke/i],
+  [/\bboiler\b/, /boiler/i], [/\binsurance\b/, /insurance/i], [/\bmot\b/, /^MOT$/i], [/\b(road )?tax\b(?! year)/, /tax/i], [/\bservice\b/, /service/i], [/\btenanc(y|ies)\b|\bcontracts?\b|\bagreements?\b/, /tenanc|agreement|contract/i], [/\bmortgage|deal|fix(ed)?\b/, /mortgage/i], [/\bpassport|visa\b/, /passport|visa/i]];
+function askDates(s) {
+  let list = allDates(); const filters = [];
+  const gs = askGroups(s); const props = S.properties.filter(p => gs.includes(groupOfProperty(p.id))).map(p => p.id);
+  if (props.length) { list = list.filter(d => props.includes(d.pid)); filters.push(gs.join(", ")); }
+  if (/\b(car|cars|vehicles?|tesla|mazda|mercedes)\b/.test(s) || S.vehicles.some(v => String(v.name || "").toLowerCase().split(/\s+/).some(w => w.length >= 3 && s.includes(" " + w + " ")))) {
+    const named = S.vehicles.filter(v => String(v.name || "").toLowerCase().split(/\s+/).some(w => w.length >= 3 && s.includes(" " + w + " ")));
+    list = list.filter(d => d.cat === "Car" && (!named.length || named.some(v => v.id === d.id))); filters.push(named.length ? named.map(v => v.name).join(", ") : "cars");
+  }
+  const kinds = ASK_DATE_KEYS.filter(([q]) => q.test(s));
+  if (kinds.length) list = list.filter(d => kinds.some(([, re]) => re.test(d.title) || re.test(d.cat)));
+  else if (/\bcertificat|safety|compliance\b/.test(s)) list = list.filter(d => d.cat === "Property" || d.cat === "Documents");
+  const overdueOnly = /\boverdue|missed|late\b/.test(s);
+  const n = (s.match(/\b(?:next|first|top)\s+(\d{1,2})\b/) || [])[1];
+  const over = list.filter(d => daysUntil(d.due) < 0), up = list.filter(d => daysUntil(d.due) >= 0);
+  const show = overdueOnly ? over : [...over, ...up.slice(0, n ? +n : /\bwhen\b/.test(s) && kinds.length ? 3 : 6)];
+  const first = up[0];
+  const say = !show.length ? (overdueOnly ? "Nothing is overdue." : "I couldn't find any dates matching that. Check they're added on the Key dates tab.")
+    : `${over.length ? `${over.length} ${over.length > 1 ? "items are" : "item is"} overdue${over.length <= 2 ? `: ${over.map(d => `${d.title}${d.where ? " at " + d.where : ""}`).join(" and ")}` : ""}. ` : ""}${!overdueOnly && first ? `Next up is ${first.title}${first.where ? ` for ${first.where}` : ""} on ${fmtD(first.due)}, in ${daysUntil(first.due)} day${daysUntil(first.due) === 1 ? "" : "s"}.` : ""}`;
+  return { say, html: `<h3 style="margin:0">${overdueOnly ? "Overdue" : "Coming up"}${filters.length ? `: ${esc(filters.join(" · "))}` : ""}</h3><p style="margin:0">${esc(say)}</p>${show.length ? `<div class="list">${show.map(d => dateRow(d)).join("")}</div>` : ""}<div class="row">${askGo("dates", "All key dates")}</div>` };
+}
+function askNetWorth() {
+  const T = totals();
+  const rows = [["Property value", g0(T.propVal)], ["Investments", g0(T.inv)], ["Cash & savings", g0(T.cashS)], ["Pensions", g0(T.pens)], ["Cars", g0(T.veh)], ["Mortgages", "−" + g0(T.mort)], ["Other debts", "−" + g0(T.debts)]].filter(r => r[1] !== "£0" && r[1] !== "−£0");
+  const say = `Your net worth is ${plainMoney(T.net)}: ${plainMoney(T.assets)} of assets, less ${plainMoney(T.liab)} owed.`;
+  return { say, html: `<h3 style="margin:0">Net worth</h3><p style="margin:0">${esc(say)}</p>${askTable(["", "£Amount"], rows, ["Net worth", g0(T.net)])}<div class="row">${askGo("overview", "Overview")}</div>` };
+}
+function askDeposits() {
+  const held = S.tenancies.filter(t => num(t.deposit) > 0 && (t.depositStatus || "Held") === "Held");
+  const ret = S.tenancies.filter(t => num(t.depositReturned) > 0).sort((a, b) => (b.depositReturnedDate || "") < (a.depositReturnedDate || "") ? -1 : 1);
+  const tot = held.reduce((a, t) => a + num(t.deposit), 0);
+  const say = `You're holding ${plainMoney(tot)} in deposits for ${held.length} tenant${held.length === 1 ? "" : "s"}.${ret.length ? ` Most recently returned: ${plainMoney(num(ret[0].depositReturned))} to ${ret[0].tenantName}${ret[0].depositReturnedDate ? ` on ${fmtD(ret[0].depositReturnedDate)}` : ""}.` : ""}`;
+  const pn = t => esc(`${(byId("properties", t.propertyId) || {}).name || ""}${t.room ? " · " + t.room : ""}`);
+  return { say, html: `<h3 style="margin:0">Deposits</h3><p style="margin:0">${esc(say)}</p>${held.length ? askTable(["Held for", "Property", "Scheme", "£Deposit"], held.map(t => [esc(t.tenantName), pn(t), esc(t.depositScheme || "—"), g0(num(t.deposit))]), ["Total", "", "", g0(tot)]) : ""}${ret.length ? `<details><summary class="sub" style="cursor:pointer">Returned (${ret.length})</summary>${askTable(["Tenant", "Property", "Date", "£Returned"], ret.map(t => [esc(t.tenantName), pn(t), t.depositReturnedDate ? fmtD(t.depositReturnedDate) : "", g0(num(t.depositReturned))]))}</details>` : ""}<div class="row">${askGo("tenants", "Tenants & deposits")}</div>` };
+}
+function askMortgages() {
+  const ms = S.properties.filter(p => num(p.balance) > 0 || num(p.monthlyPayment) > 0).sort((a, b) => (a.productEnd || "9") < (b.productEnd || "9") ? -1 : 1);
+  const tot = ms.reduce((a, p) => a + num(p.balance), 0); const next = ms.find(p => p.productEnd && daysUntil(p.productEnd) >= -30);
+  const say = ms.length ? `You owe ${plainMoney(tot)} across ${ms.length} mortgage${ms.length > 1 ? "s" : ""}.${next ? ` The next deal to end is ${next.name} on ${fmtD(next.productEnd)}.` : ""}` : "No mortgages are recorded.";
+  return { say, html: `<h3 style="margin:0">Mortgages</h3><p style="margin:0">${esc(say)}</p>${ms.length ? askTable(["Property", "Lender", "Rate", "Deal ends", "£Monthly", "£Balance"], ms.map(p => [esc(p.name), esc(p.lender || "—"), p.currentRate ? pct(p.currentRate) : "—", p.productEnd ? fmtD(p.productEnd) : "—", g0(num(p.monthlyPayment)), g0(num(p.balance))]), ["Total", "", "", "", g0(ms.reduce((a, p) => a + num(p.monthlyPayment), 0)), g0(tot)]) : ""}<div class="row">${askGo("properties", "Properties")}</div>` };
+}
+function askBudget(s) {
+  const per = askPeriod(s); const mk = per.from === per.to ? per.from : monthKey(new Date()); const B = budgetFor(mk);
+  const say = `In ${monthLabel(mk)}, money in is ${plainMoney(B.income)} and regular outgoings are ${plainMoney(B.fixed + B.mortT)}, leaving ${plainMoney(B.disposable)}. After one-offs, ${plainMoney(B.left)} is left.`;
+  return { say, html: `<h3 style="margin:0">${esc(monthLabel(mk))}</h3><p style="margin:0">${esc(say)}</p>${askTable(["", "£Amount"], [["Salaries & income", g0(B.salaries)], ["Rent", g0(B.rent)], ["Regular bills", "−" + g0(B.fixed)], ["Mortgages & loans", "−" + g0(B.mortT)], ["One-offs out", "−" + g0(B.oneOut)], ["One-offs in", g0(B.oneIn)]], ["Left over", g0(B.left)])}<div class="row">${askGo("budget", "Open Monthly budget")}</div>` };
+}
+const ASK_EXAMPLES = ["What's coming up next?", "Show rent history for room 3", "How much rent did I collect this tax year?", "How much have I spent on Nene Gardens this year?", "How much did we spend on groceries last month?", "Who owes rent?", "How much deposit am I holding?", "When does my mortgage deal end?", "What's my net worth?"];
+function askHelp(prefix) {
+  return { say: prefix || "Here are some things you can ask.", html: `${prefix ? `<p style="margin:0">${esc(prefix)}</p>` : ""}<div class="sub">Try asking:</div><div class="row" style="gap:6px">${ASK_EXAMPLES.map(q => `<button type="button" class="chip" data-act="askex" data-q="${esc(q)}" style="cursor:pointer">${esc(q)}</button>`).join("")}</div>` };
+}
+function askAnswer(text) {
+  const s = qNormalise(text) + " ";
+  const rentWord = /\brents?\b/.test(s.replace(/ground rent/g, ""));
+  if (/\b(help|what can (you|i) (ask|do|say))\b/.test(s)) return askHelp();
+  if (/\b(who owes|owes?|arrears|outstanding|unpaid|behind|not paid|late)\b/.test(s) && (rentWord || /\bowe|arrears|tenant/.test(s)) && !/\boverdue\b/.test(s)) return askArrears();
+  if (/\bnet worth|worth|wealth\b/.test(s)) return askNetWorth();
+  if (/\bdeposits?\b/.test(s)) return askDeposits();
+  const spendWord = /\b(spen[dt]|spending|expen\w*|costs?|cost us|outgoings?|paid for|pay for|paying out|bills?)\b/.test(s);
+  const dateWord = /\b(expir\w*|renew\w*|certificat\w*|due|coming up|upcoming|deadlines?|next few|next \d+|when (is|does|do|are)|overdue|reminders?|mot|safety)\b/.test(s);
+  if (/\bmortgages?\b/.test(s) && !spendWord && !/\b(spent|how much have)\b/.test(s)) return askMortgages();
+  if (rentWord || /\b(paid|payments?|collected|received)\b/.test(s) && !spendWord) {
+    const ts = askTenants(s);
+    if (ts.length === 1) return askRentHistory(ts[0], s);
+    if (ts.length > 1) return { say: `I found ${ts.length} tenants that match. Which one?`, html: `<p style="margin:0">I found ${ts.length} tenants that match. Which one?</p><div class="row" style="gap:6px">${ts.map(t => `<button type="button" class="chip" data-act="askex" data-q="${esc(`rent history for ${t.tenantName}`)}" style="cursor:pointer">${esc(t.tenantName)}${t.room ? " · " + esc(t.room) : ""}</button>`).join("")}</div>` };
+    if (rentWord && !dateWord) return askRentCollected(s);
+  }
+  if (dateWord && !spendWord) return askDates(s);
+  if (spendWord || askCats(s).length) return askSpend(s);
+  if (/\b(disposable|left over|leftover|income|salar\w*|budget|money in)\b/.test(s)) return askBudget(s);
+  if (askGroups(s).length) return askSpend(s);
+  return askHelp("Sorry, I didn't understand that question.");
+}
+let askVoice = false;
+function askSpeak(text) {
+  try { if (!window.speechSynthesis) return; speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text.replace(/£/g, "£ ").replace(/\s+/g, " ")); u.lang = "en-GB"; speechSynthesis.speak(u); } catch (e) {}
+}
+function askRun(text) {
+  let a; try { a = askAnswer(text); } catch (e) { console.error(e); a = askHelp("Sorry, something went wrong working that out."); }
+  $("#qOut").innerHTML = `<div class="card" style="gap:10px;background:var(--t2);border-color:transparent">${a.html}
+    <div class="row" style="justify-content:space-between"><span class="sub">Worked out from your own figures on this page.</span>${window.speechSynthesis ? `<button type="button" class="btn ghost small" data-act="asksay">Read it out</button>` : ""}</div></div>`;
+  $("#qOut").dataset.say = a.say;
+  if (askVoice) askSpeak(a.say);
+  askVoice = false;
+}
 
 // ---------- expenses: shared helpers ----------
 const GROUP_RULES = [
