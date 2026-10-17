@@ -214,6 +214,17 @@ th{background:var(--thead)}
 .mtab[aria-pressed="true"]{background:var(--t1)}
 .banner{border:1px solid color-mix(in srgb, var(--info) 25%, transparent)}
 .banner.bad{border-color:color-mix(in srgb, var(--bad) 25%, transparent)}
+
+.glist{font-size:13px;display:flex;flex-direction:column}
+.gcat>summary{display:flex;justify-content:space-between;gap:8px;padding:3px 0;cursor:pointer;list-style:none}
+.gcat>summary::-webkit-details-marker,.gmore>summary::-webkit-details-marker{display:none}
+.gcat>summary>span:first-child::after{content:"▸";margin-left:6px;color:var(--muted);font-size:11px}
+.gcat[open]>summary>span:first-child::after{content:"▾"}
+.gdot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px}
+.gitems{margin:2px 0 6px 14px;padding:6px 10px;background:var(--surface);border-radius:8px;display:flex;flex-direction:column;gap:3px;font-size:12.5px}
+.gitems>div{display:flex;justify-content:space-between;gap:10px}
+.gmore>summary{cursor:pointer;list-style:none;color:var(--muted);font-size:12.5px;padding:4px 0;text-decoration:underline}
+.gmore[open]>summary{display:none}
 </style>
 </head>
 <body>
@@ -1259,21 +1270,27 @@ function catsManageOpen() {
     </div></div></div>`;
 }
 function budgetGroupBlocks(B) {
-  // per-group totals this month: regular bills + mortgages + one-offs out
+  // per-group totals this month: regular bills + mortgages + one-offs out, with the items behind each category
   const groups = bGroups(); const per = {};
-  groups.forEach(g => per[g] = { bills: 0, mort: 0, one: 0, cats: {} });
-  for (const l of B.out) { const k = classify(l, true); const P = per[k.g] || (per[k.g] = { bills: 0, mort: 0, one: 0, cats: {} }); const v = B.amt(l); P.bills += v; P.cats[k.c || "Uncategorised"] = (P.cats[k.c || "Uncategorised"] || 0) + v; }
-  for (const m of B.morts) { const g = groupOfProperty(m.id) || homeGroup(); const P = per[g] || (per[g] = { bills: 0, mort: 0, one: 0, cats: {} }); P.mort += m.amount; P.cats["Mortgage"] = (P.cats["Mortgage"] || 0) + m.amount; }
-  for (const d of B.loans) { const P = per[homeGroup()]; P.bills += d.amount; P.cats["Loans & finances"] = (P.cats["Loans & finances"] || 0) + d.amount; }
-  for (const o of B.oneoffs.filter(o => o.kind !== "in")) { const k = classify(o, false); const P = per[k.g] || (per[k.g] = { bills: 0, mort: 0, one: 0, cats: {} }); P.one += num(o.amount); P.cats[k.c || "Uncategorised"] = (P.cats[k.c || "Uncategorised"] || 0) + num(o.amount); }
+  const P0 = () => ({ bills: 0, mort: 0, one: 0, cats: {}, items: {} });
+  groups.forEach(g => per[g] = P0());
+  const put = (g, kind, cat, label, v, note) => { const P = per[g] || (per[g] = P0()); P[kind] += v; const c = cat || "Uncategorised"; P.cats[c] = (P.cats[c] || 0) + v; (P.items[c] = P.items[c] || []).push({ label, v, note }); };
+  for (const l of B.out) { const k = classify(l, true); put(k.g, "bills", k.c, l.label, B.amt(l), "regular"); }
+  for (const m of B.morts) put(groupOfProperty(m.id) || homeGroup(), "mort", "Mortgage", m.label, m.amount, m.sub);
+  for (const d of B.loans) put(homeGroup(), "bills", "Loans & finances", d.label, d.amount, d.sub);
+  for (const o of B.oneoffs.filter(o => o.kind !== "in")) { const k = classify(o, false); put(k.g, "one", k.c, o.label || "One-off", num(o.amount), `one-off${o.date ? " · " + fmtD(o.date) : ""}`); }
   const cols = ["var(--t1k)", "var(--t2k)", "var(--t3k)", "var(--t4k)", "var(--t5k)", "var(--t6k)"];
   const tints = ["var(--t1)", "var(--t2)", "var(--t3)", "var(--t4)", "var(--t5)", "var(--t6)"];
-  return `<div class="grid g-cards" style="grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr))">${Object.keys(per).map((g, gi) => {
+  const catRow = (P, c, v, i) => `<details class="gcat"><summary><span><i class="gdot" style="background:${cols[i % 6]}"></i>${esc(c)} <span class="muted">(${P.items[c].length})</span></span><span class="num">${gbp(v)}</span></summary>
+      <div class="gitems">${P.items[c].sort((a, b) => b.v - a.v).map(it => `<div><span>${esc(it.label)}${it.note ? ` <span class="muted">${esc(it.note)}</span>` : ""}</span><span class="num">${gbp(it.v)}</span></div>`).join("")}</div></details>`;
+  return `<div class="grid g-cards" style="grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));align-items:start">${Object.keys(per).map((g, gi) => {
     const P = per[g]; const tot = P.bills + P.mort + P.one; const list = Object.entries(P.cats).sort((a, b) => b[1] - a[1]);
+    const rows = list.map(([c, v], i) => catRow(P, c, v, i));
     return `<div class="card" style="gap:8px;background:${tints[gi % 6]};border-color:transparent"><div class="sechead"><h3 style="color:${cols[gi % 6]}">${esc(g)}</h3><b class="num">${gbp(tot)}</b></div>
       <div class="sub">Bills ${gbp(P.bills)}${P.mort ? ` · mortgage ${gbp(P.mort)}` : ""} · one-offs ${gbp(P.one)}</div>
       ${tot ? `<div class="bar" style="height:10px;background:var(--surface)">${list.map(([c, v], i) => `<i style="width:${(v / tot * 100).toFixed(2)}%;background:${cols[i % 6]}" title="${esc(c)}: ${gbp(v)}"></i>`).join("")}</div>
-      <div class="list" style="font-size:13px">${list.slice(0, 6).map(([c, v], i) => `<div class="row" style="justify-content:space-between;padding:2px 0"><span><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${cols[i % 6]};margin-right:6px"></i>${esc(c)}</span><span class="num">${gbp(v)}</span></div>`).join("")}${list.length > 6 ? `<div class="sub">+${list.length - 6} more</div>` : ""}</div>` : `<div class="sub">Nothing recorded yet this month.</div>`}
+      <div class="glist">${rows.slice(0, 6).join("")}${rows.length > 6 ? `<details class="gmore"><summary>Show all ${rows.length} categories</summary>${rows.slice(6).join("")}</details>` : ""}</div>
+      <div class="sub" style="font-size:12px">Tap a category to see what's in it.</div>` : `<div class="sub">Nothing recorded yet this month.</div>`}
     </div>`; }).join("")}</div>`;
 }
 
