@@ -647,6 +647,7 @@ const SCHEMA = {
     {k:"endDate",l:"Tenancy ends / moved out",t:"date"},
     {h:"Deposit"},
     {k:"deposit",l:"Deposit held (£)",t:"money"},
+    {k:"depositReceivedDate",l:"Deposit received on",t:"date"},
     {k:"depositScheme",l:"Protection scheme",t:"select",o:["DPS","TDS","mydeposits","Not yet protected","No deposit taken"]},
     {k:"depositRef",l:"Scheme reference",t:"text"},
     {k:"depositStatus",l:"Deposit status",t:"select",o:["Held","Returned in full","Partly returned","Kept for damages"]},
@@ -2525,16 +2526,23 @@ function buildImportRows(tx, defGroup) {
   for (const t of tx.filter(t => t.inn)) {
     const tid = matchTenant(t), own = isOwnTransfer(t);
     const salary = /salary|wages|payroll|\bbgc\b/i.test(t.desc) || t.type === "BGC";
+    const tt = tid ? byId("tenancies", tid) : null;
+    const depLike = /\bdep(osit)?\b|holding/i.test(t.desc) || (tt && num(tt.deposit) > 0 && Math.abs(num(tt.deposit) - t.inn) < 0.01 && Math.abs(num(tt.rent) - t.inn) >= 0.01 && !(tt.depositTx || []).length);
     const r = { section: "in", key: txKey(t), include: !!tid && !own, name: titleCase(txName(t)).slice(0, 40), desc: t.desc, ref: t.ref || "", method: txMethod(t), amount: t.inn, day: +t.date.slice(8,10), date: t.date, count: 1, months: 1, tenantId: tid,
-      type: tid && !own ? "rent" : salary ? "income" : "oneoffin", rentMonth: tid ? rentMonthFor(tid, t.date) : t.date.slice(0,7),
+      type: tid && !own ? (depLike ? "depin" : "rent") : /\bdep(osit)?\b/i.test(t.desc) ? "depin" : salary ? "income" : "oneoffin", rentMonth: tid ? rentMonthFor(tid, t.date) : t.date.slice(0,7),
       note: own ? "Looks like a transfer between your own accounts" : tid || defGroup === homeGroup() ? "" : "If this is rent, choose “Rent from tenant” and pick who paid it. It will be remembered." };
     const k = classify({ propertyId: tid ? (byId("tenancies", tid) || {}).propertyId : "", label: r.name }, false); r.bgroup = defGroup || k.g; r.bcat = "";
     if (!tid && !own) { const ex = findExisting(t, "in"); if (ex) { r.type = "existing"; r.target = ex.id; r.include = true; r.txs = [{ date: t.date, amount: t.inn }]; r.note = `Already in your budget as “${ex.label}”. Ticked: that month's figure is set to this amount.`; } }
     rows.push(r);
   }
   // money out: group repeating payments by payee; keep separate payments made more than once a month apart
+  const depOuts = tx.filter(t => t.out && (/\bdep(osit)?\b/i.test(t.desc) || (matchTenant(t) && !isOwnTransfer(t))));
+  for (const t of depOuts) {
+    const tid = matchTenant(t);
+    rows.push({ section: "one", key: txKey(t), include: !!tid, name: titleCase(txName(t)).slice(0, 40), desc: t.desc, ref: t.ref || "", method: txMethod(t), type: "depret", tenantId: tid, amount: t.out, day: +t.date.slice(8,10), date: t.date, count: 1, months: 1, bgroup: defGroup, bcat: "", note: tid ? "Paid to a tenant, so suggested as a deposit returned" : "Choose the tenant this deposit was returned to" });
+  }
   const base = new Map();
-  for (const t of tx.filter(t => t.out)) { const k = "o:" + merchantKey((t.ref && /^(SO|BP|OBP)$/.test(t.type||"")) ? t.desc : (t.name || t.desc)); if (!base.has(k)) base.set(k, []); base.get(k).push(t); }
+  for (const t of tx.filter(t => t.out && !depOuts.includes(t))) { const k = "o:" + merchantKey((t.ref && /^(SO|BP|OBP)$/.test(t.type||"")) ? t.desc : (t.name || t.desc)); if (!base.has(k)) base.set(k, []); base.get(k).push(t); }
   const groups = [];
   for (const [k, list] of base) {
     const perMonth = {}; list.forEach(t => { const m = t.date.slice(0,7); perMonth[m] = (perMonth[m] || 0) + 1; });
@@ -2578,15 +2586,15 @@ function buildImportRows(tx, defGroup) {
   }
   // group + category: remembered choice, then a property named in the description, then the statement's default group
   for (const r of rows) {
-    if (r.section === "in") continue;
+    if (r.section === "in" || r.type === "depret") continue;
     if (r.remembered && bGroups().includes(r.remembered.g)) { r.bgroup = r.remembered.g; r.bcat = r.remembered.c || ""; continue; }
     r.bgroup = r.propertyId ? (groupOfProperty(r.propertyId) || defGroup) : defGroup;
     r.bcat = mapCat(r.bgroup, r.group, r.name + " " + r.desc, r.section === "rec");
   }
   // already imported before? (same date, amount and description)
   const seenOne = new Set(S.months.flatMap(m => (m.oneoffs || []).map(o => o.srcKey).filter(Boolean)));
-  const seenRent = new Set(S.rent.flatMap(r => r.bankTx || []));
-  for (const r of rows) if ((r.section === "one" && seenOne.has(r.key)) || (r.section === "in" && (seenRent.has(r.key) || seenOne.has(r.key)))) { r.include = false; r.dup = true; r.note = "Already imported"; }
+  const seenRent = new Set([...S.rent.flatMap(r => r.bankTx || []), ...S.tenancies.flatMap(t => [...(t.depositTx || []), ...(t.depReturnTx || [])].map(x => x.key))]);
+  for (const r of rows) if ((r.section === "one" && (seenOne.has(r.key) || seenRent.has(r.key))) || (r.section === "in" && (seenRent.has(r.key) || seenOne.has(r.key)))) { r.include = false; r.dup = true; r.note = "Already imported"; }
   const ord = { in: 0, match: 1, rec: 2, one: 3 };
   return rows.sort((a,b) => ord[a.section]-ord[b.section] || (a.section === "rec" ? b.amount - a.amount : (a.date < b.date ? -1 : 1)));
 }
@@ -2619,7 +2627,7 @@ function importRender() {
     match: ["Already in your budget", "These match bills, mortgages or loans you've already set up, so they won't be added again. Ticked lines just update that month's figure to the actual amount."],
     rec: ["New repeating payments out", "Not in your budget yet. Suggested as monthly bills; untick anything you don't want."],
     one: ["Other payments out", "Tick the ones to add as one-off spends."] };
-  const typeOpts = r => (r.section === "in" ? [["rent","Rent from tenant"],["existing","Already in budget"],["income","New monthly income"],["oneoffin","One-off money in"]] : [["existing","Already in budget"],["bill","New monthly bill"],["oneoff","One-off spend"]]).map(([k,l]) => `<option value="${k}" ${r.type===k?"selected":""}>${l}</option>`).join("");
+  const typeOpts = r => (r.section === "in" ? [["rent","Rent from tenant"],["depin","Deposit received"],["existing","Already in budget"],["income","New monthly income"],["oneoffin","One-off money in"]] : r.section === "rec" ? [["existing","Already in budget"],["bill","New monthly bill"],["oneoff","One-off spend"]] : [["existing","Already in budget"],["bill","New monthly bill"],["oneoff","One-off spend"],["depret","Deposit returned"]]).map(([k,l]) => `<option value="${k}" ${r.type===k?"selected":""}>${l}</option>`).join("");
   const catSel = (r, i) => `<select data-ir="${i}" data-if="bcat" aria-label="Category"><option value="">Choose…</option>${(r.bcat && !bCats(r.bgroup).includes(r.bcat) ? [r.bcat, ...bCats(r.bgroup)] : bCats(r.bgroup)).map(c=>`<option ${c===r.bcat?"selected":""}>${esc(c)}</option>`).join("")}</select>`;
   const grpSel = (r, i) => `<select data-ir="${i}" data-if="bgroup" aria-label="Group">${bGroups().map(g=>`<option ${g===r.bgroup?"selected":""}>${esc(g)}</option>`).join("")}</select>`;
   const selected = IMP.rows.filter(r => r.include);
@@ -2633,6 +2641,7 @@ function importRender() {
         <td><input data-ir="${i}" data-if="name" value="${esc(r.name)}" style="width:170px" aria-label="Name"><div class="sub" title="${esc(r.desc)}">${esc(r.desc.slice(0,38))}${r.count>1?` · ${r.count} payments`:""}${r.method&&r.method!=="Bank"?` · ${r.method}`:""}</div>${r.note?`<div class="sub" style="color:var(--warn)">${esc(r.note)}</div>`:""}</td>
         <td><select data-ir="${i}" data-if="type" aria-label="Add as">${typeOpts(r)}</select></td>
         ${r.type === "rent" ? `<td><select data-ir="${i}" data-if="tenantId" aria-label="Tenant">${tenantOptions(r.tenantId)}</select></td><td><input type="month" data-ir="${i}" data-if="rentMonth" value="${r.rentMonth}" aria-label="Rent for month"></td>`
+          : (r.type === "depin" || r.type === "depret") ? `<td><select data-ir="${i}" data-if="tenantId" aria-label="Tenant">${tenantOptions(r.tenantId)}</select></td><td class="sub">${r.type === "depin" ? "Recorded as deposit held" : "Recorded as deposit returned"}${r.tenantId ? (() => { const t = byId("tenancies", r.tenantId); return t ? ` · deposit ${gbp(t.deposit||0)}${num(t.depositReturned) ? `, returned ${gbp(t.depositReturned)}` : ""}` : ""; })() : ""}</td>`
           : r.type === "existing" ? `<td colspan="2"><select data-ir="${i}" data-if="target" aria-label="Already in budget as" style="max-width:100%">${targetOptions(r.section === "in" ? "in" : "out", r.target)}</select></td>`
           : r.type === "income" ? `<td colspan="2" class="sub">Added to Money in each month</td>` : `<td>${grpSel(r,i)}</td><td>${catSel(r,i)}</td>`}
         <td class="n"><input class="amt" data-ir="${i}" data-if="amount" inputmode="decimal" value="${r.amount}" aria-label="Amount"></td>
@@ -2645,7 +2654,7 @@ function importRender() {
     <div class="row"><label class="sub" for="impDef" style="font-weight:600">Spending on this account is mostly for</label><select id="impDef" class="input">${bGroups().map(g=>`<option ${g===IMP.defGroup?"selected":""}>${esc(g)}</option>`).join("")}</select><span class="sub">Changes the group for every payment out you haven't set yourself.</span></div>
     ${html}${datalists()}
     <div class="row" style="justify-content:space-between;position:sticky;bottom:0;background:var(--surface);padding-block:10px;border-top:1px solid var(--line)">
-      <span class="sub"><b>${selected.length}</b> selected · rent ${gbp(sum("rent"))} (${rentN}) · new monthly bills ${gbp(sum("bill"))} · one-offs ${gbp(sum("oneoff"))} · already in budget ${selected.filter(r=>r.type==="existing").length}</span>
+      <span class="sub"><b>${selected.length}</b> selected · rent ${gbp(sum("rent"))} (${rentN}) · deposits in ${gbp(sum("depin"))} · deposits returned ${gbp(sum("depret"))} · new monthly bills ${gbp(sum("bill"))} · one-offs ${gbp(sum("oneoff"))} · already in budget ${selected.filter(r=>r.type==="existing").length}</span>
       <div class="row"><button type="button" class="btn" data-act="close">Cancel</button><button type="button" class="btn primary" data-act="impsave" ${selected.length?"":"disabled"}>Save ${selected.length}</button></div>
     </div>`;
 }
@@ -2784,8 +2793,8 @@ async function importSave() {
   const sel = IMP.rows.filter(r => r.include && num(r.amount));
   const noTarget = sel.filter(r => r.type === "existing" && !r.target);
   if (noTarget.length) { toast(`Choose which budget item ${noTarget.length>1?"these match":"this matches"}, or untick ${noTarget.length>1?"them":"it"}`); return; }
-  const noTenant = sel.filter(r => r.type === "rent" && !r.tenantId);
-  if (noTenant.length) { toast(`Choose the tenant for ${noTenant.length} rent payment${noTenant.length>1?"s":""}, or untick ${noTenant.length>1?"them":"it"}`); return; }
+  const noTenant = sel.filter(r => (r.type === "rent" || r.type === "depin" || r.type === "depret") && !r.tenantId);
+  if (noTenant.length) { toast(`Choose the tenant for ${noTenant.length} rent or deposit payment${noTenant.length>1?"s":""}, or untick ${noTenant.length>1?"them":"it"}`); return; }
   const btn = document.querySelector('[data-act="impsave"]'); if (btn) { btn.disabled = true; btn.textContent = "Adding…"; }
   let n = 0, rentN = 0;
   // remember payers and payees for next time
@@ -2799,6 +2808,19 @@ async function importSave() {
     const d = { tenancyId: t.id, propertyId: t.propertyId, month: mk, due: has(prev.due) ? num(prev.due) : num(t.rent),
       received: Math.round((num(prev.received) + num(r.amount)) * 100) / 100, method: "Bank", date: r.date, note: prev.note || "", bankTx: [...(prev.bankTx || []), r.key] };
     if (await save("rent", rentDocId(t.id, mk), d)) { n++; rentN++; }
+    payerMap[merchantKey(r.desc)] = t.id;
+  }
+  // 1a. deposits -> the tenant's deposit record (not counted as income or spending)
+  for (const r of sel.filter(r => r.type === "depin" || r.type === "depret")) {
+    const t = byId("tenancies", r.tenantId); if (!t) continue;
+    const field = r.type === "depin" ? "depositTx" : "depReturnTx";
+    const list = [...(t[field] || [])]; if (list.some(x => x.key === r.key)) continue;
+    list.push({ key: r.key, amount: num(r.amount), date: r.date });
+    const total = Math.round(list.reduce((a, x) => a + num(x.amount), 0) * 100) / 100;
+    let upd;
+    if (r.type === "depin") upd = { depositTx: list, deposit: total, depositStatus: "Held", depositReceivedDate: list[0].date };
+    else { const held = num(t.deposit); upd = { depReturnTx: list, depositReturned: total, depositReturnedDate: r.date, depositStatus: held && total < held - 0.005 ? "Partly returned" : "Returned in full" }; }
+    if (await patch("tenancies", t.id, upd)) n++;
     payerMap[merchantKey(r.desc)] = t.id;
   }
   // 1b. already in the budget: remember the link, and set that month's figure to the actual amount
@@ -2848,7 +2870,7 @@ document.addEventListener("change", async (e) => {
     r[f] = el.type === "checkbox" ? el.checked : el.value;
     if (f === "bgroup" || f === "bcat") r.touched = true;
     if (f === "bgroup") { r.bcat = mapCat(r.bgroup, r.bcat, r.name + " " + r.desc, r.type === "bill"); importRender(); }
-    if (f === "tenantId") { if (r.tenantId) { r.rentMonth = rentMonthFor(r.tenantId, r.date); r.include = true; } importRender(); }
+    if (f === "tenantId") { if (r.tenantId) { if (r.type === "rent") r.rentMonth = rentMonthFor(r.tenantId, r.date); r.include = true; } importRender(); }
     if (f === "target" && r.target) { r.include = true; importRender(); }
     if (f === "type") { if (r.type === "existing" && !r.target) { const ex = findExisting({ desc: r.desc, name: r.name, date: r.date, out: r.section === "in" ? 0 : num(r.amount), inn: r.section === "in" ? num(r.amount) : 0, type: "" }, r.section === "in" ? "in" : "out"); if (ex) r.target = ex.id; } if (r.type === "rent" && r.tenantId) r.rentMonth = rentMonthFor(r.tenantId, r.date); if (r.type !== "rent" && !r.bgroup) r.bgroup = IMP.defGroup; importRender(); }
     else if (f === "include" || f === "amount") importRender();
