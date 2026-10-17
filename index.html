@@ -184,6 +184,9 @@ tr.catrow td{font-weight:600;font-size:12.5px;color:var(--accent);border-bottom:
 tr.catrow td:first-child{padding-left:18px}
 .catchip{gap:6px;padding:4px 6px 4px 10px;font-size:12.5px}
 .catchip .x{border:0;background:transparent;color:inherit;cursor:pointer;font-size:14px;line-height:1;padding:0 2px}
+.kd-sec{scroll-margin-top:130px}
+.kd-head{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;flex-wrap:wrap;padding:14px 16px;border-radius:var(--r)}
+.kd-head .row{gap:6px}
 .modal.wide{width:min(1060px,100%)}
 .impsec{border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;display:flex;flex-direction:column;gap:8px}
 .impsec summary{cursor:pointer;padding:2px 0}
@@ -690,7 +693,7 @@ const SCHEMA = {
     {k:"policyNo",l:"Policy number",t:"text"},
     {k:"insurancePremium",l:"Premium this year (£)",t:"money"},
     {k:"insurerPhone",l:"Claims phone",t:"text"},
-    {h:"Breakdown cover"},
+    {h:"Breakdown cover (optional)"},
     {k:"breakdownDue",l:"Breakdown cover renewal",t:"date"},
     {k:"breakdownProvider",l:"Breakdown provider",t:"text",list:"breakdown"},
     {k:"breakdownRef",l:"Membership number",t:"text"},
@@ -798,19 +801,19 @@ const VF = [["motDue","MOT",30],["taxDue","Road tax",30],["insuranceDue","Car in
 function allDates(includeUndated) {
   const out = [];
   const ad = (x, def) => num(x) > 0 ? num(x) : def;
-  for (const c of S.checks) { const p = byId("properties", c.propertyId); out.push({cat:"Property", title:c.label, where:p?p.name:"", due:c.due, col:"checks", id:c.id, repeat:c.repeat, done:true, soon:ad(c.alertDays, /weekly/i.test(c.repeat||"")?2:30), provider:c.provider, ref:c.reference, cost:c.cost, contact:c.contact}); }
+  for (const c of S.checks) { const p = byId("properties", c.propertyId); out.push({cat:"Property", pid:c.propertyId, title:c.label, where:p?p.name:"", due:c.due, col:"checks", id:c.id, repeat:c.repeat, done:true, soon:ad(c.alertDays, /weekly/i.test(c.repeat||"")?2:30), provider:c.provider, ref:c.reference, cost:c.cost, contact:c.contact}); }
   for (const p of S.properties) {
-    if (p.productEnd) out.push({cat:"Mortgage", title:`Mortgage deal ends (${pct(p.currentRate)})`, where:p.name, due:p.productEnd, col:"properties", id:p.id, soon:120, provider:p.lender});
+    if (p.productEnd) out.push({cat:"Mortgage", pid:p.id, title:`Mortgage deal ends (${pct(p.currentRate)})`, where:p.name, due:p.productEnd, col:"properties", id:p.id, soon:120, provider:p.lender});
   }
-  for (const t of S.tenancies) if (isCurrent(t) && t.endDate) out.push({cat:"Tenancy", title: daysUntil(t.endDate) < 0 ? `Fixed term ended: ${t.tenantName||"tenant"}` : `Tenancy ends: ${t.tenantName||"tenant"}`, tenancy:true, where:(byId("properties",t.propertyId)||{}).name||"", due:t.endDate, col:"tenancies", id:t.id, soon:60});
+  for (const t of S.tenancies) if (isCurrent(t) && t.endDate) out.push({cat:"Tenancy", pid:t.propertyId, title: daysUntil(t.endDate) < 0 ? `Fixed term ended: ${t.tenantName||"tenant"}` : `Tenancy ends: ${t.tenantName||"tenant"}`, tenancy:true, where:(byId("properties",t.propertyId)||{}).name||"", due:t.endDate, col:"tenancies", id:t.id, soon:60});
   for (const v of S.vehicles) for (const [k,l,def] of VF) {
-    if (!v[k] && !includeUndated) continue;
+    if (!v[k] && (!includeUndated || k === "breakdownDue")) continue;
     const extra = k==="insuranceDue" ? {provider:v.insurer, ref:v.policyNo, cost:v.insurancePremium, contact:v.insurerPhone} : k==="breakdownDue" ? {provider:v.breakdownProvider, ref:v.breakdownRef} : k==="taxDue" ? {cost:v.taxCost} : k==="serviceDue" ? {provider:v.garage} : {};
     out.push({cat:"Car", title:l, where:`${v.name||""}${v.reg?" · "+v.reg:""}`, due:v[k], col:"vehicles", id:v.id, vfield:k, done:true, soon:def, ...extra});
   }
   for (const r of S.reminders) if (!r.done) out.push({cat:r.category||"Other", title:r.title, where:r.who?ownerName(r.who):"", due:r.due, col:"reminders", id:r.id, repeat:r.repeat, done:true, soon:ad(r.alertDays,30), provider:r.provider, ref:r.reference, cost:r.cost, contact:r.contact});
   for (const d of S.debts) if (d.endDate) out.push({cat:"Finance", title:`${d.name} ends`, where:"", due:d.endDate, col:"debts", id:d.id, soon:60});
-  for (const d of (S.documents||[])) if (d.expiry) out.push({cat:"Documents", title:`${d.cat||"Document"}: ${d.name}`, where:docLinkName(d.link), due:d.expiry, col:"documents", id:d.id, soon:60});
+  for (const d of (S.documents||[])) if (d.expiry) out.push({cat:"Documents", pid:docPropOf(d), title:`${d.cat||"Document"}: ${d.name}`, where:docLinkName(d.link), due:d.expiry, col:"documents", id:d.id, soon:60});
   const list = includeUndated ? out : out.filter(d => d.due);
   return list.sort((a,b)=> (a.due||"9999") < (b.due||"9999") ? -1 : 1);
 }
@@ -842,7 +845,7 @@ function draw() {
   if (!db) { v.innerHTML = connMsg; return; }
   const ready = COLS.every(c => S.loaded[c]);
   if (!ready) { v.innerHTML = `<div class="empty">Loading your figures…</div>`; return; }
-  maybeAutoSnapshot(T);
+  maybeAutoSnapshot(T); syncChecklists();
   v.innerHTML = (VIEWS[tab] || VIEWS.overview)(T) + datalists();
   window.scrollTo(0, scrollY);
 }
@@ -1613,19 +1616,28 @@ VIEWS.money = (T) => {
 };
 
 VIEWS.dates = () => {
-  const cats = ["all","Property","Mortgage","Tenancy","Car","Insurance","Home","Documents","Tax","Finance","Family","Health","Other"];
-  const all = allDates();
-  const list = all.filter(d => dateFilter==="all" || d.cat===dateFilter);
+  const all = allDates(true);
   const A = attention();
-  const present = new Set(all.map(d=>d.cat));
-  const u = undated().filter(d => dateFilter==="all" || d.cat===dateFilter);
-  // group by month for a readable timeline; overdue items go in their own group at the top
-  const groups = []; let cur = null;
-  for (const d of list) { const key = daysUntil(d.due) < 0 ? "overdue" : d.due.slice(0,7); if (!cur || cur.key !== key) { cur = {key, items:[]}; groups.push(cur); } cur.items.push(d); }
   const yearCost = S.reminders.filter(r=>!r.done).reduce((a,r)=>a+num(r.cost),0) + S.checks.reduce((a,c)=>a+(/yearly/i.test(c.repeat||"")?num(c.cost):0),0) + S.vehicles.reduce((a,v)=>a+num(v.insurancePremium)+num(v.taxCost),0);
+  const order = p => /^Home/.test(p.kind||"") ? 0 : p.kind === "HMO" ? 1 : 2;
+  const props = [...S.properties].sort((a,b) => order(a) - order(b) || (a.name||"").localeCompare(b.name||""));
+  const sorted = list => [...list].sort((a,b) => { const ka = !a.due ? "9" : daysUntil(a.due) < 0 ? "0"+a.due : "1"+a.due, kb = !b.due ? "9" : daysUntil(b.due) < 0 ? "0"+b.due : "1"+b.due; return ka < kb ? -1 : ka > kb ? 1 : (a.title||"").localeCompare(b.title||""); });
+  const sectionStats = list => { const over = list.filter(d => d.due && daysUntil(d.due) < 0).length, nod = list.filter(d => !d.due).length, soon = list.filter(d => d.due && daysUntil(d.due) >= 0 && daysUntil(d.due) <= (d.soon||30)).length;
+    return `${over?`<span class="chip bad">${over} overdue</span>`:""}${soon?`<span class="chip warn">${soon} due soon</span>`:""}${nod?`<span class="chip">${nod} need a date</span>`:""}${!over&&!soon&&!nod?`<span class="chip good">All up to date</span>`:""}`; };
+  const tints = ["var(--t1)","var(--t2)","var(--t3)"], inks = ["var(--t1k)","var(--t2k)","var(--t3k)"];
+  const propSections = props.map((p, i) => {
+    const list = sorted(all.filter(d => d.pid === p.id && d.col !== "vehicles"));
+    const label = /^Home/.test(p.kind||"") ? "Our home" : p.kind === "HMO" ? "HMO" : "Let property";
+    return `<section class="block kd-sec" id="kd-${p.id}"><div class="kd-head" style="background:${tints[i%3]}"><div><div class="sub" style="color:${inks[i%3]};font-weight:600;text-transform:uppercase;letter-spacing:.06em;font-size:11px">${label}</div><h2>${esc(p.name)}</h2>${p.address && p.address !== p.name ? `<div class="sub">${esc(p.address)}</div>` : ""}</div>
+      <div class="row">${sectionStats(list)}${canWrite?`<button class="btn small" data-act="new" data-col="checks" data-prop="${p.id}">+ Add date</button>`:""}</div></div>
+      ${list.length ? `<div class="card list">${list.map(d=>dateRow(d,{hideCat:d.cat==="Property"})).join("")}</div>` : `<div class="empty">No dates for this property yet.</div>`}
+    </section>`;
+  }).join("");
+  const personal = sorted(all.filter(d => !d.pid && d.col !== "vehicles"));
+  const jump = [...props.map(p => [`kd-${p.id}`, p.name]), ["kd-personal", "Personal"], ["kd-cars", "Cars"]];
   return `<section class="block">
-    <div class="sechead"><div><h2>Key dates</h2><p class="sub">Certificates, renewals, mortgage deals, tenancies, cars and documents in one timeline.</p></div>
-      <div class="toolbar">${S.vehicles.length?"":addBtn("vehicles","Add car")}${addBtn("reminders","Add renewal or date")}<button class="btn" data-act="ics">Add to my calendar</button></div></div>
+    <div class="sechead"><div><h2>Key dates</h2><p class="sub">Certificates, insurance and renewals for each property, then personal dates and cars.</p></div>
+      <div class="toolbar">${addBtn("reminders","Add personal date")}<button class="btn" data-act="ics">Add to my calendar</button></div></div>
     <div class="grid g-stats">
       <div class="stat"><span class="k">Overdue</span><span class="v ${A.over.length?"neg":""}">${A.over.length}</span></div>
       <div class="stat"><span class="k">Act now</span><span class="v">${A.now.length}</span><span class="h">Inside their warning window</span></div>
@@ -1633,22 +1645,24 @@ VIEWS.dates = () => {
       <div class="stat"><span class="k">Missing a date</span><span class="v">${undated().length}</span></div>
       <div class="stat"><span class="k">Renewals per year</span><span class="v">${gbp(yearCost)}</span><span class="h">Where you've entered a cost</span></div>
     </div>
-    <div class="row">${cats.filter(c=>c==="all"||present.has(c)||undated().some(d=>d.cat===c)).map(c=>`<button class="btn small" data-act="dfilter" data-m="${c}" aria-pressed="${dateFilter===c}" style="${dateFilter===c?"border-color:var(--accent);color:var(--accent)":""}">${c==="all"?"Everything":c}</button>`).join("")}</div>
-    ${groups.length?`<div class="timeline">${groups.map(g=>`<div class="tgroup"><h3 class="tmonth ${g.key==="overdue"?"neg":""}">${g.key==="overdue"?"Overdue":monthLabel(g.key)}</h3><div class="card list">${g.items.map(d=>dateRow(d)).join("")}</div></div>`).join("")}</div>`:`<div class="empty">No dated items${dateFilter!=="all"?" in this category":""} yet.</div>`}
+    <div class="row">${jump.map(([id,l])=>`<button class="btn small" data-act="kdjump" data-m="${id}">${esc(l)}</button>`).join("")}</div>
   </section>
-  ${u.length?`<section class="block" id="nodate"><div class="sechead"><div><h2>Needs a date</h2><p class="sub">Add the date from the certificate, policy or document so it can remind you.</p></div></div><div class="card list">${u.map(d=>dateRow(d)).join("")}</div></section>`:""}
-  <section class="block">
-    <div class="sechead"><div><h2>Cars</h2><p class="sub">Insurer, policy and breakdown details with MOT and tax dates. Check MOT and tax dates free on GOV.UK.</p></div>${addBtn("vehicles","Add car")}</div>
+  ${propSections}
+  <section class="block kd-sec" id="kd-personal"><div class="kd-head" style="background:var(--t4)"><div><div class="sub" style="color:var(--t4k);font-weight:600;text-transform:uppercase;letter-spacing:.06em;font-size:11px">Not property-related</div><h2>Personal</h2><div class="sub">Tax deadlines, passports, licences, other insurance and reminders.</div></div>
+    <div class="row">${sectionStats(personal)}${addBtn("reminders","Add date")}</div></div>
+    ${personal.length ? `<div class="card list">${personal.map(d=>dateRow(d)).join("")}</div>` : `<div class="empty">No personal dates yet.</div>`}
+  </section>
+  <section class="block" id="kd-cars">
+    <div class="sechead"><div><h2>Cars</h2><p class="sub">Insurance, MOT, road tax and service dates. Check MOT and tax dates free on GOV.UK.</p></div>${addBtn("vehicles","Add car")}</div>
     ${S.vehicles.length?`<div class="grid g-cards">${S.vehicles.map(v=>`<article class="card"><div class="sechead"><div><h3>${esc(v.name)}</h3><div class="sub">${v.reg?`<span class="num plate">${esc(v.reg)}</span> · `:""}${esc(ownerName(v.owner))}</div></div>${canWrite?`<button class="btn small" data-act="edit" data-col="vehicles" data-id="${v.id}">Edit</button>`:""}</div>
       <div class="kv">
         <div><span class="k">Insured with</span><span class="v">${esc(v.insurer||"—")}</span></div>
         <div><span class="k">Policy number</span><span class="v">${esc(v.policyNo||"—")}</span></div>
         <div><span class="k">Premium</span><span class="v">${has(v.insurancePremium)?gbp(v.insurancePremium):"—"}</span></div>
         <div><span class="k">Claims phone</span><span class="v">${esc(v.insurerPhone||"—")}</span></div>
-        <div><span class="k">Breakdown</span><span class="v">${esc(v.breakdownProvider||"—")}${v.breakdownRef?` · ${esc(v.breakdownRef)}`:""}</span></div>
         <div><span class="k">Finance left</span><span class="v">${has(v.financeOwed)&&num(v.financeOwed)?gbp(v.financeOwed):"—"}</span></div>
       </div>
-      <div class="list">${VF.map(([k,l])=>`<div class="li"><div class="t">${l}<div class="m">${v[k]?fmtD(v[k]):"Add the date"}</div></div>${v[k]?dueChip(v[k]):'<span class="chip">No date</span>'}</div>`).join("")}</div></article>`).join("")}</div>`:`<div class="empty">No cars added yet. Add each car with its insurer and policy number, and the MOT and tax dates.${addBtn("vehicles","Add car")}</div>`}
+      <div class="list">${VF.filter(([k])=>k!=="breakdownDue"||v[k]).map(([k,l])=>`<div class="li"><div class="t">${l}<div class="m">${v[k]?fmtD(v[k]):"Add the date"}</div></div><div class="row">${v[k]?dueChip(v[k]):'<span class="chip">No date</span>'}${canWrite&&v[k]?`<button class="btn small" data-act="done" data-col="vehicles" data-id="${v.id}" data-vfield="${k}">Renewed +1 yr</button>`:""}</div></div>`).join("")}</div></article>`).join("")}</div>`:`<div class="empty">No cars added yet. Add each car with its insurer and policy number, and the MOT and tax dates.${addBtn("vehicles","Add car")}</div>`}
   </section>`;
 };
 function buildICS() {
@@ -1880,10 +1894,53 @@ async function submitForm() {
   closeModal(); toast(id ? "Saved" : "Added");
 }
 const CHECKS = {
-  "HMO":[["Gas safety certificate (CP12)","Yearly"],["Boiler service","Yearly"],["Electrical safety report (EICR)","5 years"],["Energy performance certificate (EPC)","10 years"],["HMO licence renewal","5 years"],["Fire risk assessment","Yearly"],["Fire alarm test (weekly)","Weekly"],["Fire alarm & emergency lighting service","6 months"],["Fire extinguishers / blankets check","Yearly"],["PAT testing (landlord appliances)","Yearly"],["Legionella risk assessment","2 years"],["Landlord insurance renewal","Yearly"]],
-  "Single let":[["Gas safety certificate (CP12)","Yearly"],["Boiler service","Yearly"],["Electrical safety report (EICR)","5 years"],["Energy performance certificate (EPC)","10 years"],["Smoke & CO alarm check","Yearly"],["Legionella risk assessment","2 years"],["Landlord insurance renewal","Yearly"]],
-  "Home (where we live)":[["Home insurance renewal","Yearly"],["Boiler service","Yearly"],["Boiler cover / HomeCare renewal","Yearly"]]
+  "HMO":[["Landlord insurance renewal","Yearly"],["Gas safety certificate (CP12)","Yearly"],["Boiler service","Yearly"],["Electrical safety report (EICR)","5 years"],["Energy performance certificate (EPC)","10 years"],["HMO licence renewal","5 years"],["Fire risk assessment","Yearly"],["Fire alarm test (weekly)","Weekly"],["Fire alarm & emergency lighting test certificate","6 months"],["Fire extinguishers check","Yearly"],["Smoke alarm check","Monthly"]],
+  "Single let":[["Energy performance certificate (EPC)","10 years"],["Electrical safety report (EICR)","5 years"]],
+  "Home (where we live)":[["Buildings insurance renewal","Yearly"],["Home insurance renewal","Yearly"],["Energy performance certificate (EPC)","10 years"],["Boiler service","Yearly"]]
 };
+// Matches an existing check to a standard checklist item, so renamed or older items aren't duplicated.
+const CHECK_MATCH = [
+  [/emergency light/i, "Fire alarm & emergency lighting test certificate"],
+  [/fire alarm test|weekly/i, "Fire alarm test (weekly)"],
+  [/fire risk/i, "Fire risk assessment"],
+  [/extinguish|fire blanket/i, "Fire extinguishers check"],
+  [/smoke/i, "Smoke alarm check"],
+  [/landlord insurance/i, "Landlord insurance renewal"],
+  [/building/i, "Buildings insurance renewal"],
+  [/home insurance|contents/i, "Home insurance renewal"],
+  [/\bepc\b|energy perf/i, "Energy performance certificate (EPC)"],
+  [/eicr|electrical/i, "Electrical safety report (EICR)"],
+  [/gas safety|cp12/i, "Gas safety certificate (CP12)"],
+  [/boiler service/i, "Boiler service"],
+  [/hmo licen/i, "HMO licence renewal"],
+];
+const checkStd = label => { for (const [re, std] of CHECK_MATCH) if (re.test(label || "")) return std; return null; };
+// One-time tidy of each property's checklist to the standard list. Items with dates you've entered are never deleted.
+let checklistSyncing = false;
+async function syncChecklists() {
+  if (checklistSyncing || !canWrite || !db) return;
+  const done = (S.settings && S.settings.checklistV2) || {};
+  const todo = S.properties.filter(p => !done[p.id] && CHECKS[p.kind]);
+  if (!todo.length) return;
+  checklistSyncing = true;
+  try {
+    for (const p of todo) {
+      const want = CHECKS[p.kind];
+      const mine = S.checks.filter(c => c.propertyId === p.id);
+      const used = new Set();
+      for (const [label, repeat] of want) {
+        const hit = mine.find(c => !used.has(c.id) && (c.label === label || checkStd(c.label) === label));
+        if (hit) { used.add(hit.id); if (hit.label !== label) await patch("checks", hit.id, { label }); }
+        else await save("checks", null, { propertyId: p.id, label, repeat, due: "", lastDone: "" });
+      }
+      for (const c of mine) if (!used.has(c.id) && !c.due && !c.lastDone) await remove("checks", c.id);
+      if (/^Home/.test(p.kind || "") && (!p.name || /^our home$/i.test(p.name))) await patch("properties", p.id, { name: "7 Read Place", address: p.address || "7 Read Place, Ambrosden, Bicester" });
+      if (p.kind === "HMO" && !p.address && /nene/i.test(p.name || "")) await patch("properties", p.id, { address: "113 Nene Gardens" });
+      done[p.id] = true;
+    }
+    await save("settings", "main", { ...S.settings, checklistV2: done });
+  } finally { checklistSyncing = false; }
+}
 async function seedChecks(pid, kind) {
   const list = CHECKS[kind] || CHECKS["Single let"];
   for (const [label, repeat] of list) await save("checks", null, {propertyId:pid, label, repeat, due:"", lastDone:""});
@@ -1912,6 +1969,7 @@ document.addEventListener("click", async (e) => {
   if (act === "snapshot") { const T = totals(); const mk = monthKey(new Date()); if (await save("snapshots", mk, {net:Math.round(T.net), assets:Math.round(T.assets), liabilities:Math.round(T.liab), propertyEquity:Math.round(T.homeEq+T.rentalEq), investments:Math.round(T.inv+T.pens+T.cashS)})) toast(`Snapshot saved for ${monthLabel(mk)}`); return; }
   if (act === "backup") return backup();
   if (act === "ics") return exportICS();
+  if (act === "kdjump") { const el = document.getElementById(b.dataset.m); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
   if (act === "tenroll") { const t = byId("tenancies", b.dataset.id); if (!t) return; if (await patch("tenancies", t.id, { endDate: "", fixedTermEnded: t.endDate || "", status: "Current" })) toast(`${t.tenantName} is now on a rolling tenancy`); return; }
   if (act === "tenout") { const t = byId("tenancies", b.dataset.id); if (!t) return; if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Tap again to confirm"; return; } if (await patch("tenancies", t.id, { status: "Moved out" })) toast(`${t.tenantName} marked as moved out. Remember to sort out their deposit.`); return; }
   if (act === "cats-open") return catsManageOpen();
