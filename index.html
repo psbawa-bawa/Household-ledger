@@ -1894,14 +1894,13 @@ async function submitForm() {
   closeModal(); toast(id ? "Saved" : "Added");
 }
 const CHECKS = {
-  "HMO":[["Landlord insurance renewal","Yearly"],["Gas safety certificate (CP12)","Yearly"],["Boiler service","Yearly"],["Electrical safety report (EICR)","5 years"],["Energy performance certificate (EPC)","10 years"],["HMO licence renewal","5 years"],["Fire risk assessment","Yearly"],["Fire alarm test (weekly)","Weekly"],["Fire alarm & emergency lighting test certificate","6 months"],["Fire extinguishers check","Yearly"],["Smoke alarm check","Monthly"]],
+  "HMO":[["Landlord insurance renewal","Yearly"],["Gas safety certificate (CP12)","Yearly"],["Boiler service","Yearly"],["Electrical safety report (EICR)","5 years"],["Energy performance certificate (EPC)","10 years"],["HMO licence renewal","5 years"],["Fire risk assessment","Yearly"],["Fire alarm & emergency lighting test certificate","6 months"],["Fire extinguishers check","Yearly"],["Smoke alarm check","Monthly"]],
   "Single let":[["Energy performance certificate (EPC)","10 years"],["Electrical safety report (EICR)","5 years"]],
-  "Home (where we live)":[["Buildings insurance renewal","Yearly"],["Home insurance renewal","Yearly"],["Energy performance certificate (EPC)","10 years"],["Boiler service","Yearly"]]
+  "Home (where we live)":[["Buildings insurance renewal","Yearly"],["Energy performance certificate (EPC)","10 years"],["Boiler service","Yearly"]]
 };
 // Matches an existing check to a standard checklist item, so renamed or older items aren't duplicated.
 const CHECK_MATCH = [
   [/emergency light/i, "Fire alarm & emergency lighting test certificate"],
-  [/fire alarm test|weekly/i, "Fire alarm test (weekly)"],
   [/fire risk/i, "Fire risk assessment"],
   [/extinguish|fire blanket/i, "Fire extinguishers check"],
   [/smoke/i, "Smoke alarm check"],
@@ -1917,11 +1916,31 @@ const CHECK_MATCH = [
 const checkStd = label => { for (const [re, std] of CHECK_MATCH) if (re.test(label || "")) return std; return null; };
 // One-time tidy of each property's checklist to the standard list. Items with dates you've entered are never deleted.
 let checklistSyncing = false;
+// Items you've said you don't need: removed from these property types even if a date was entered.
+const CHECK_REMOVE = {
+  "Single let": [/boiler/i, /gas safety|cp12|\bgas\b/i, /legionella/i, /landlord insurance/i, /smoke & co|carbon monoxide/i],
+  "HMO": [/fire alarm test|weekly fire/i, /legionella/i],
+  "Home (where we live)": [/home insurance|contents insurance/i],
+};
+async function removeUnwanted() {
+  const done = (S.settings && S.settings.checklistV3) || {};
+  const todo = S.properties.filter(p => !done[p.id] && CHECK_REMOVE[p.kind]);
+  if (!todo.length) return false;
+  for (const p of todo) {
+    for (const c of S.checks.filter(c => c.propertyId === p.id)) {
+      if (/emergency light/i.test(c.label || "")) continue;
+      if (CHECK_REMOVE[p.kind].some(re => re.test(c.label || ""))) await remove("checks", c.id);
+    }
+    done[p.id] = true;
+  }
+  await save("settings", "main", { ...S.settings, checklistV3: done });
+  return true;
+}
 async function syncChecklists() {
   if (checklistSyncing || !canWrite || !db) return;
   const done = (S.settings && S.settings.checklistV2) || {};
   const todo = S.properties.filter(p => !done[p.id] && CHECKS[p.kind]);
-  if (!todo.length) return;
+  if (!todo.length) { checklistSyncing = true; try { await removeUnwanted(); } finally { checklistSyncing = false; } return; }
   checklistSyncing = true;
   try {
     for (const p of todo) {
@@ -1939,6 +1958,7 @@ async function syncChecklists() {
       done[p.id] = true;
     }
     await save("settings", "main", { ...S.settings, checklistV2: done });
+    await removeUnwanted();
   } finally { checklistSyncing = false; }
 }
 async function seedChecks(pid, kind) {
