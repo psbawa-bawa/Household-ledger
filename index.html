@@ -180,6 +180,10 @@ main{padding-bottom:96px}
 .upload{border:2px dashed var(--line);background:var(--t2)}
 .upload.drag{border-color:var(--accent);background:var(--t1)}
 .upload .field input,.upload .field select{background:var(--surface)}
+tr.catrow td{font-weight:600;font-size:12.5px;color:var(--accent);border-bottom:1px dashed var(--line)}
+tr.catrow td:first-child{padding-left:18px}
+.catchip{gap:6px;padding:4px 6px 4px 10px;font-size:12.5px}
+.catchip .x{border:0;background:transparent;color:inherit;cursor:pointer;font-size:14px;line-height:1;padding:0 2px}
 .modal.wide{width:min(1060px,100%)}
 .impsec{border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;display:flex;flex-direction:column;gap:8px}
 .impsec summary{cursor:pointer;padding:2px 0}
@@ -711,13 +715,12 @@ const SCHEMA = {
   budget: { title:"regular income or bill", fields:[
     {k:"label",l:"Name",t:"text",req:1,ph:"e.g. British Gas, Council tax, Salary"},
     {k:"type",l:"Money in or out",t:"select",o:[["expense","Money out"],["income","Money in"]]},
-    {k:"group",l:"Group",t:"text",list:"budgetGroups",hint:"Bills with the same group are totalled together"},
+    {k:"bgroupcat",l:"Group and category",t:"groupcat"},
     {k:"amount",l:"Usual monthly amount (£)",t:"money"},
     {k:"varies",l:"Amount changes each month",t:"select",o:[["","No, it's fixed"],["yes","Yes, check it each month"]]},
     {k:"day",l:"Leaves account on day",t:"number",hint:"1–31"},
     {k:"method",l:"Paid by",t:"select",o:["Direct debit","Standing order","Card","Salary","Cash","Other"]},
     {k:"who",l:"Whose",t:"select",o:OWNERS},
-    {k:"propertyId",l:"Linked property",t:"select",o:()=>[["","None"],...S.properties.map(p=>[p.id,p.name||"Untitled"])],hint:"Bills linked to a let property count in its profit figures"},
     {k:"startMonth",l:"From month",t:"month",hint:"Blank = always"},
     {k:"endMonth",l:"Until month",t:"month",hint:"Blank = ongoing"},
     {k:"notes",l:"Notes",t:"textarea",wide:1,ph:"Account number, supplier, contract end"}
@@ -1110,7 +1113,8 @@ function attentionBlock() {
 }
 
 function propCosts(p) {
-  const linked = S.budget.filter(l => l.type !== "income" && l.propertyId === p.id && (!l.endMonth || l.endMonth >= monthKey(new Date())));
+  const pg = groupOfProperty(p.id);
+  const linked = S.budget.filter(l => l.type !== "income" && (l.propertyId === p.id || (pg && pg !== homeGroup() && classify(l, true).g === pg)) && (!l.endMonth || l.endMonth >= monthKey(new Date())));
   return linked.length ? linked.reduce((a,l)=>a+num(l.amount),0) : num(p.monthlyCosts);
 }
 const gbpK = v => { const a = Math.abs(v); const s = v<0?"−":""; return a>=1000 ? `${s}£${(a/1000).toFixed(a>=10000?0:1)}k` : `${s}£${Math.round(a)}`; };
@@ -1138,14 +1142,132 @@ function budgetFor(mk) {
   const any = income || fixed || mortT || oneoffs.length;
   return { md, ov, amt, inc, out, rentRows, morts, loans, oneoffs, salaries, rent, income, fixed, mortT, disposable, oneOut, oneIn, left, any, useExpected, future };
 }
+// ---------- budget groups & categories (saved in Settings so new ones stay) ----------
+const BG_DEFAULT = ["Bawa Residence", "Nene Gardens", "Renaissance Court"];
+const CAT_DEFAULT = {
+  "Bawa Residence": ["Direct debits","Groceries","Entertainment","Gifts","Grooming","Clothes","Subscriptions","Children","Savings & investments","India commitment","Loans & finances","Credit cards","Car"],
+  _property: ["Direct debits","Utilities","Insurance","Repairs & maintenance","Service charge & ground rent","Agent & licence fees"]
+};
+const bGroups = () => (S.settings.budgetGroups && S.settings.budgetGroups.length) ? S.settings.budgetGroups : BG_DEFAULT;
+const bCats = g => { const c = (S.settings.budgetCats || {})[g]; return c && c.length ? c : (CAT_DEFAULT[g] || CAT_DEFAULT._property); };
+const homeGroup = () => bGroups()[0];
+function groupOfProperty(pid) {
+  const p = byId("properties", pid); if (!p) return "";
+  if (/^Home/.test(p.kind || "")) return homeGroup();
+  const n = String(p.name || "").toLowerCase();
+  return bGroups().find(g => g.toLowerCase() === n) || bGroups().find(g => n && (n.includes(g.toLowerCase()) || g.toLowerCase().includes(n))) || "";
+}
+function propertyOfGroup(g) {
+  if (g === homeGroup()) { const h = S.properties.find(p => /^Home/.test(p.kind || "")); return h ? h.id : ""; }
+  const p = S.properties.find(p => groupOfProperty(p.id) === g); return p ? p.id : "";
+}
+const CAT_RULES = [
+  [/grocer|tesco|sainsbury|asda|aldi|lidl|morrisons|waitrose|co-?op|ocado|iceland/, "Groceries"],
+  [/netflix|spotify|disney|prime video|amazon prime|apple\.com|icloud|youtube|audible|subscription|gym|chatgpt|openai|now tv/, "Subscriptions"],
+  [/american express|\bamex\b|credit card|barclaycard|capital one|mbna/, "Credit cards"],
+  [/finance|\bfin\b|\bloan|klarna|clearpay|\bv12\b/, "Loans & finances"],
+  [/\bcar\b|petrol|fuel|parking|dvla|\bmot\b|road tax|car & transport/, "Car"],
+  [/school|child|nursery|kids|pocket money/, "Children"],
+  [/gift|birthday|rakhi|wedding|present/, "Gifts"],
+  [/salon|parlour|barber|hair|nails|beauty|grooming|spa\b/, "Grooming"],
+  [/clothes|clothing|next retail|primark|h&m|zara|nike|adidas|marks|m&s|tk ?maxx|shoes/, "Clothes"],
+  [/cinema|movie|restaurant|pizza|takeaway|subway|eating|entertain|holiday|travel|cafe|coffee|esquires|deliveroo|just eat|uber eats/, "Entertainment"],
+  [/india|\binr\b|\bsip\b|zerodha|groww|nri/, "India commitment"],
+  [/\bisa\b|trading ?212|vanguard|aj bell|hargreaves|savings|invest/, "Savings & investments"],
+  [/repair|plumb|boiler|maintenance|screwfix|toolstation|wickes|b&q|handyman|electrician/, "Repairs & maintenance"],
+  [/\bgas\b|electric|water|energy|octopus|british gas|broadband|utilit/, "Utilities"],
+  [/insurance|landlord cover/, "Insurance"],
+  [/service charge|ground rent/, "Service charge & ground rent"],
+  [/agent|licen|lettings?/, "Agent & licence fees"],
+];
+function mapCat(g, raw, text, isBill) {
+  const cats = bCats(g); const r = String(raw || "").trim();
+  const exact = cats.find(c => c.toLowerCase() === r.toLowerCase()); if (exact) return exact;
+  const t = (r + " " + String(text || "")).toLowerCase();
+  for (const [re, c] of CAT_RULES) if (re.test(t) && cats.includes(c)) return c;
+  if (isBill) return cats.includes("Direct debits") ? "Direct debits" : (cats[0] || "");
+  return "";
+}
+// Works out group + category for a bill or one-off, including ones saved before groups existed.
+function classify(x, isBill) {
+  if (x.bgroup && bGroups().includes(x.bgroup)) return { g: x.bgroup, c: x.bcat || "" };
+  let g = "";
+  if (x.propertyId) g = groupOfProperty(x.propertyId);
+  const legacy = isBill ? x.group : x.cat;
+  if (!g && bGroups().includes(legacy)) g = legacy;
+  if (!g && legacy) { const p = S.properties.find(p => String(p.name || "").toLowerCase() === String(legacy).toLowerCase() || (/^hmo$/i.test(legacy) && p.kind === "HMO")); if (p) g = groupOfProperty(p.id); }
+  if (!g) g = homeGroup();
+  const raw = bGroups().includes(legacy) ? "" : legacy;
+  return { g, c: mapCat(g, raw, x.label, isBill) };
+}
+function groupCatFields(pfx, g, c, opts = {}) {
+  const groups = bGroups();
+  const cats = bCats(g); const list = c && !cats.includes(c) ? [c, ...cats] : cats;
+  return `<div class="field"><label for="${pfx}-bg">Group</label><select id="${pfx}-bg" data-bgsel="${pfx}">${groups.map(x => `<option ${x === g ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></div>
+    <div class="field"><label for="${pfx}-bc">Category</label><select id="${pfx}-bc" data-bcsel="${pfx}">${opts.allowBlank !== false ? `<option value="">Choose…</option>` : ""}${list.map(x => `<option ${x === c ? "selected" : ""}>${esc(x)}</option>`).join("")}<option value="__new">+ New category…</option></select>
+      <input id="${pfx}-bcnew" class="input" placeholder="New category name" hidden style="margin-top:6px"></div>`;
+}
+async function addCategory(g, c) {
+  c = String(c || "").trim(); if (!c) return "";
+  const cats = bCats(g);
+  const found = cats.find(x => x.toLowerCase() === c.toLowerCase()); if (found) return found;
+  const all = { ...(S.settings.budgetCats || {}) };
+  for (const gg of bGroups()) if (!all[gg]) all[gg] = bCats(gg);
+  all[g] = [...cats, c];
+  await save("settings", "main", { ...S.settings, budgetCats: all });
+  return c;
+}
+async function readGroupCat(pfx) {
+  const g = ($("#" + pfx + "-bg") || {}).value || homeGroup();
+  let c = ($("#" + pfx + "-bc") || {}).value || "";
+  if (c === "__new") c = await addCategory(g, ($("#" + pfx + "-bcnew") || {}).value);
+  return { g, c };
+}
+document.addEventListener("change", (e) => {
+  const el = e.target;
+  if (el.dataset && el.dataset.bgsel) {
+    const pfx = el.dataset.bgsel; const sel = $("#" + pfx + "-bc"); if (!sel) return;
+    const cur = sel.value; const cats = bCats(el.value);
+    sel.innerHTML = `<option value="">Choose…</option>` + cats.map(x => `<option ${x === cur ? "selected" : ""}>${esc(x)}</option>`).join("") + `<option value="__new">+ New category…</option>`;
+    const n = $("#" + pfx + "-bcnew"); if (n) n.hidden = true;
+  }
+  if (el.dataset && el.dataset.bcsel) { const n = $("#" + el.dataset.bcsel + "-bcnew"); if (n) { n.hidden = el.value !== "__new"; if (!n.hidden) n.focus(); } }
+});
+function catsManageOpen() {
+  $("#modalRoot").innerHTML = `<div class="scrim" id="scrim"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="cmT">
+    <header><h2 id="cmT">Budget categories</h2><button class="btn ghost" data-act="close" aria-label="Close">✕</button></header>
+    <div style="padding:16px 18px;display:flex;flex-direction:column;gap:16px">
+      <p class="sub" style="margin:0">Categories you add here stay for future months, and show up when you add bills, one-offs or import a statement. Removing a category doesn't change anything already recorded under it.</p>
+      ${bGroups().map((g, gi) => `<div class="card" style="gap:10px"><h3>${esc(g)}</h3>
+        <div class="row">${bCats(g).map(c => `<span class="chip catchip">${esc(c)}${canWrite ? ` <button class="x" data-act="catdel" data-g="${esc(g)}" data-c="${esc(c)}" aria-label="Remove ${esc(c)}">×</button>` : ""}</span>`).join("")}</div>
+        ${canWrite ? `<div class="row"><input class="input" id="catnew-${gi}" placeholder="New category for ${esc(g)}" style="flex:1;min-width:0"><button class="btn small primary" data-act="catadd" data-g="${esc(g)}" data-i="${gi}">Add</button></div>` : ""}</div>`).join("")}
+    </div></div></div>`;
+}
+function budgetGroupBlocks(B) {
+  // per-group totals this month: regular bills + mortgages + one-offs out
+  const groups = bGroups(); const per = {};
+  groups.forEach(g => per[g] = { bills: 0, mort: 0, one: 0, cats: {} });
+  for (const l of B.out) { const k = classify(l, true); const P = per[k.g] || (per[k.g] = { bills: 0, mort: 0, one: 0, cats: {} }); const v = B.amt(l); P.bills += v; P.cats[k.c || "Uncategorised"] = (P.cats[k.c || "Uncategorised"] || 0) + v; }
+  for (const m of B.morts) { const g = groupOfProperty(m.id) || homeGroup(); const P = per[g] || (per[g] = { bills: 0, mort: 0, one: 0, cats: {} }); P.mort += m.amount; P.cats["Mortgage"] = (P.cats["Mortgage"] || 0) + m.amount; }
+  for (const d of B.loans) { const P = per[homeGroup()]; P.bills += d.amount; P.cats["Loans & finances"] = (P.cats["Loans & finances"] || 0) + d.amount; }
+  for (const o of B.oneoffs.filter(o => o.kind !== "in")) { const k = classify(o, false); const P = per[k.g] || (per[k.g] = { bills: 0, mort: 0, one: 0, cats: {} }); P.one += num(o.amount); P.cats[k.c || "Uncategorised"] = (P.cats[k.c || "Uncategorised"] || 0) + num(o.amount); }
+  const cols = ["var(--t1k)", "var(--t2k)", "var(--t3k)", "var(--t4k)", "var(--t5k)", "var(--t6k)"];
+  const tints = ["var(--t1)", "var(--t2)", "var(--t3)", "var(--t4)", "var(--t5)", "var(--t6)"];
+  return `<div class="grid g-cards" style="grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr))">${Object.keys(per).map((g, gi) => {
+    const P = per[g]; const tot = P.bills + P.mort + P.one; const list = Object.entries(P.cats).sort((a, b) => b[1] - a[1]);
+    return `<div class="card" style="gap:8px;background:${tints[gi % 6]};border-color:transparent"><div class="sechead"><h3 style="color:${cols[gi % 6]}">${esc(g)}</h3><b class="num">${gbp(tot)}</b></div>
+      <div class="sub">Bills ${gbp(P.bills)}${P.mort ? ` · mortgage ${gbp(P.mort)}` : ""} · one-offs ${gbp(P.one)}</div>
+      ${tot ? `<div class="bar" style="height:10px;background:var(--surface)">${list.map(([c, v], i) => `<i style="width:${(v / tot * 100).toFixed(2)}%;background:${cols[i % 6]}" title="${esc(c)}: ${gbp(v)}"></i>`).join("")}</div>
+      <div class="list" style="font-size:13px">${list.slice(0, 6).map(([c, v], i) => `<div class="row" style="justify-content:space-between;padding:2px 0"><span><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${cols[i % 6]};margin-right:6px"></i>${esc(c)}</span><span class="num">${gbp(v)}</span></div>`).join("")}${list.length > 6 ? `<div class="sub">+${list.length - 6} more</div>` : ""}</div>` : `<div class="sub">Nothing recorded yet this month.</div>`}
+    </div>`; }).join("")}</div>`;
+}
+
 const OO_CATS = ["Repairs & maintenance","Furnishing & appliances","Cleaning & gardening","Utilities","Insurance","Council tax & licences","Letting agent & legal fees","Accountant & professional fees","Car & transport","Groceries","Household","Eating out","Holidays & travel","Children & school","Medical & health","Gifts & occasions","Clothing","Shopping","Tax payment","Charity","Refund","Bonus","Other"];
 function ooForm(pfx, o, actions) {
-  const catList = OO_CATS.includes(o.cat||"") || !o.cat ? OO_CATS : [o.cat, ...OO_CATS];
   return `<div class="card oo-form" id="${pfx}-form">
     <div class="fgroup">
       <div class="field"><label for="${pfx}-label">What was it</label><input id="${pfx}-label" value="${esc(o.label||"")}" placeholder="e.g. Boiler repair"></div>
-      <div class="field"><label for="${pfx}-cat">Category</label><select id="${pfx}-cat"><option value="">Choose…</option>${catList.map(c=>`<option ${c===(o.cat||"")?"selected":""}>${esc(c)}</option>`).join("")}</select></div>
-      <div class="field"><label for="${pfx}-prop">Property</label><select id="${pfx}-prop"><option value="">Not property-related</option>${S.properties.map(p=>`<option value="${p.id}" ${p.id===o.propertyId?"selected":""}>${esc(p.name)}</option>`).join("")}</select></div>
+      ${(() => { const k = o.label || o.bgroup || o.cat || o.propertyId ? classify(o, false) : { g: homeGroup(), c: "" }; return groupCatFields(pfx, k.g, k.c); })()}
       <div class="field"><label for="${pfx}-date">Date paid</label><input type="date" id="${pfx}-date" value="${o.date||todayISO()}"></div>
       <div class="field"><label for="${pfx}-method">Paid by</label><select id="${pfx}-method">${["Bank","Cash","Card"].map(m=>`<option ${m===(o.method||"Bank")?"selected":""}>${m}</option>`).join("")}</select></div>
       <div class="field"><label for="${pfx}-kind">Money in or out</label><select id="${pfx}-kind"><option value="out" ${o.kind!=="in"?"selected":""}>Money out</option><option value="in" ${o.kind==="in"?"selected":""}>Money in</option></select></div>
@@ -1161,13 +1283,14 @@ function ooCatFrom(group, text) {
   for (const [re,c] of map) if (re.test(t)) return c;
   return "";
 }
-function ooRead(pfx) {
+async function ooRead(pfx) {
   const v = id => ($("#"+pfx+"-"+id) || {}).value || "";
-  return { label: v("label").trim(), cat: v("cat"), propertyId: v("prop"), date: v("date") || todayISO(), method: v("method"), kind: v("kind"), amount: num(v("amt")), reason: v("reason").trim() };
+  const k = await readGroupCat(pfx);
+  return { label: v("label").trim(), bgroup: k.g, bcat: k.c, cat: k.c, propertyId: propertyOfGroup(k.g), date: v("date") || todayISO(), method: v("method"), kind: v("kind"), amount: num(v("amt")), reason: v("reason").trim() };
 }
 function ooCatSummary(oo) {
   const out = oo.filter(o => o.kind !== "in"); if (!out.length) return "";
-  const by = {}; for (const o of out) by[o.cat || "Uncategorised"] = (by[o.cat || "Uncategorised"] || 0) + num(o.amount);
+  const by = {}; for (const o of out) { const k = classify(o, false); const key = `${k.g} · ${k.c || "Uncategorised"}`; by[key] = (by[key] || 0) + num(o.amount); }
   const tot = out.reduce((a,o)=>a+num(o.amount),0);
   const cash = out.filter(o=>o.method==="Cash").reduce((a,o)=>a+num(o.amount),0);
   const cols = ["var(--t1k)","var(--t2k)","var(--t3k)","var(--t4k)","var(--t5k)","var(--t6k)"];
@@ -1199,8 +1322,15 @@ VIEWS.budget = () => {
   const strip = months.map(m => { const b = budgetFor(m); return `<button class="mtab ${m===nowK?"now":""}" data-act="bmonth" data-m="${m}" aria-pressed="${m===mk}"><span>${monthShort(m)}</span><b class="${b.any&&b.left<0?"neg":""}">${b.any?gbpK(b.left):"—"}</b></button>`; }).join("");
   const amtInput = l => { const over = has(B.ov[l.id]); return `<input class="amt" id="bl-${l.id}" data-bl="${l.id}" inputmode="decimal" value="${over?B.ov[l.id]:(has(l.amount)?l.amount:"")}" placeholder="0" ${ro()} aria-label="${esc(l.label)} amount">${over&&num(B.ov[l.id])!==num(l.amount)?`<div class="sub">usual ${gbp(l.amount)}</div>`:""}`; };
   const lineRow = l => `<tr><td><b>${esc(l.label)}</b>${l.varies?' <span class="chip warn">Check</span>':""}<div class="sub">${[l.method, l.day?`day ${esc(l.day)}`:"", l.who?ownerName(l.who):""].filter(Boolean).join(" · ")}</div></td><td class="n">${amtInput(l)}</td><td>${canWrite?`<button class="btn ghost small" data-act="edit" data-col="budget" data-id="${l.id}">Edit</button>`:""}</td></tr>`;
-  const groups = {}; for (const l of B.out) { const g = l.group || "Other bills"; (groups[g] = groups[g] || []).push(l); }
-  const gOrder = Object.keys(groups).sort((a,b)=>{ const o=["Home","HMO","Renaissance Court","Credit cards"]; const ia=o.indexOf(a), ib=o.indexOf(b); return (ia<0?99:ia)-(ib<0?99:ib) || a.localeCompare(b); });
+  const tree = {}; for (const g of bGroups()) tree[g] = {};
+  for (const l of B.out) { const k = classify(l, true); ((tree[k.g] = tree[k.g] || {})[k.c || "Uncategorised"] = tree[k.g][k.c || "Uncategorised"] || []).push({ l }); }
+  for (const m of B.morts) { const g = groupOfProperty(m.id) || homeGroup(); ((tree[g] = tree[g] || {})["Mortgage"] = tree[g]["Mortgage"] || []).push({ x: m }); }
+  for (const d of B.loans) { const g = homeGroup(); (tree[g]["Loans & finances"] = tree[g]["Loans & finances"] || []).push({ x: d }); }
+  const rowAmt = r => r.l ? B.amt(r.l) : r.x.amount;
+  const xRow = x => `<tr><td><b>${esc(x.label)}</b><div class="sub">${esc(x.sub)}</div></td><td class="n num">${gbp(x.amount)}</td><td>${canWrite?`<button class="btn ghost small" data-act="edit" data-col="${x.col}" data-id="${x.id}">Edit</button>`:""}</td></tr>`;
+  const outRows = Object.keys(tree).map(g => { const cats = tree[g]; const gt = Object.values(cats).flat().reduce((a,r)=>a+rowAmt(r),0);
+    const order = [...bCats(g), "Mortgage"]; const ck = Object.keys(cats).sort((a,b)=>{ const ia=order.indexOf(a), ib=order.indexOf(b); return (ia<0?99:ia)-(ib<0?99:ib) || a.localeCompare(b); });
+    return `<tr class="grp"><td>${esc(g)}</td><td class="n">${gbp(gt)}</td><td></td></tr>` + (ck.length ? ck.map(c => { const rs = cats[c]; return `<tr class="catrow"><td>${esc(c)}</td><td class="n num">${gbp(rs.reduce((a,r)=>a+rowAmt(r),0))}</td><td></td></tr>` + rs.sort((a,b)=>((a.l||a.x).label||"").localeCompare((b.l||b.x).label||"")).map(r => r.l ? lineRow(r.l) : xRow(r.x)).join(""); }).join("") : `<tr><td colspan="3" class="sub">No regular bills yet.</td></tr>`); }).join("");
   const flow = [["Regular bills",B.fixed,"var(--muted)"],["Mortgages & loans",B.mortT,"var(--saffron)"],["One-offs",B.oneOut,"var(--bad)"],["Left over",Math.max(B.left,0),"var(--good)"]];
   const flowTot = Math.max(B.income + B.oneIn, flow.reduce((a,f)=>a+f[1],0), 1);
   const oo = [...B.oneoffs].sort((a,b)=>(a.date||"")<(b.date||"")?-1:1);
@@ -1223,6 +1353,8 @@ VIEWS.budget = () => {
     </div>
     ${B.income?`<div class="card" style="gap:8px"><div class="bar" style="height:20px" role="img" aria-label="Where the money goes">${flow.filter(f=>f[1]>0).map(f=>`<i style="width:${(f[1]/flowTot*100).toFixed(2)}%;background:${f[2]}" title="${f[0]}: ${gbp(f[1])}"></i>`).join("")}</div>
       <div class="legend">${flow.map(f=>`<span><i style="background:${f[2]}"></i>${f[0]} <b class="num">${gbp(f[1])}</b> <span class="muted">${B.income?Math.round(f[1]/B.income*100)+"%":""}</span></span>`).join("")}</div></div>`:""}
+    <div class="sechead"><h3>Spending by group</h3>${canWrite?`<button class="btn small" data-act="cats-open">Manage categories</button>`:""}</div>
+    ${budgetGroupBlocks(B)}
     <div class="grid g-cards" style="align-items:start">
       <div class="tablewrap"><table><thead><tr><th>Money in</th><th class="n">${monthShort(mk)}</th><th></th></tr></thead><tbody>
         ${B.inc.map(lineRow).join("")}
@@ -1230,8 +1362,7 @@ VIEWS.budget = () => {
         ${!B.inc.length&&!B.rentRows.length?`<tr><td colspan="3" class="sub">Add salaries with “Add income or bill”. Rent comes in from the Rent tab.</td></tr>`:""}
       </tbody><tfoot><tr><td>Total in</td><td class="n">${gbp(B.income)}</td><td></td></tr></tfoot></table></div>
       <div class="tablewrap"><table><thead><tr><th>Money out</th><th class="n">${monthShort(mk)}</th><th></th></tr></thead><tbody>
-        ${gOrder.map(g=>{ const ls=groups[g].sort((a,b)=>(a.label||"").localeCompare(b.label||"")); return `<tr class="grp"><td>${esc(g)}</td><td class="n">${gbp(ls.reduce((a,l)=>a+B.amt(l),0))}</td><td></td></tr>${ls.map(lineRow).join("")}`; }).join("")}
-        ${B.morts.length||B.loans.length?`<tr class="grp"><td>Mortgages &amp; loans</td><td class="n">${gbp(B.mortT)}</td><td></td></tr>${[...B.morts,...B.loans].map(x=>`<tr><td><b>${esc(x.label)}</b><div class="sub">${esc(x.sub)}</div></td><td class="n num">${gbp(x.amount)}</td><td>${canWrite?`<button class="btn ghost small" data-act="edit" data-col="${x.col}" data-id="${x.id}">Edit</button>`:""}</td></tr>`).join("")}`:`<tr class="grp"><td colspan="3">Mortgages: add monthly payments on the Properties tab</td></tr>`}
+        ${outRows}
       </tbody><tfoot><tr><td>Total out</td><td class="n">${gbp(B.fixed+B.mortT)}</td><td></td></tr></tfoot></table></div>
     </div>
   </section>
@@ -1239,11 +1370,10 @@ VIEWS.budget = () => {
     <div class="sechead"><div><h2>One-offs in ${monthShort(mk)}</h2><p class="sub">Spends that aren't regular: repairs, holidays, school trips, a new boiler. Money that comes in once (a refund, a bonus) goes here too.</p></div></div>
     ${canWrite ? ooForm("ooN", {date: mk===nowK?todayISO():mk+"-01", kind:"out", method:"Bank"}, `<button class="btn primary" data-act="ooadd">Add one-off</button>`) : ""}
     ${oo.length ? ooCatSummary(oo) : ""}
-    ${oo.length ? `<div class="tablewrap"><table><thead><tr><th>Date paid</th><th>What &amp; why</th><th>Category</th><th>Property</th><th>Paid by</th><th class="n">Amount</th><th></th></tr></thead><tbody>
+    ${oo.length ? `<div class="tablewrap"><table><thead><tr><th>Date paid</th><th>What &amp; why</th><th>Group</th><th>Category</th><th>Paid by</th><th class="n">Amount</th><th></th></tr></thead><tbody>
       ${oo.map(o=>`<tr><td class="num" style="white-space:nowrap">${fmtD(o.date)}</td>
         <td><b>${esc(o.label)}</b>${o.reason?`<div class="sub">${esc(o.reason)}</div>`:""}</td>
-        <td>${o.cat?`<span class="chip">${esc(o.cat)}</span>`:'<span class="muted">—</span>'}</td>
-        <td>${o.propertyId?esc((byId("properties",o.propertyId)||{}).name||""):'<span class="muted">—</span>'}</td>
+        ${(() => { const k = classify(o, false); return `<td>${esc(k.g)}</td><td>${k.c ? `<span class="chip">${esc(k.c)}</span>` : '<span class="chip warn">Choose</span>'}</td>`; })()}
         <td>${o.method?`<span class="chip ${o.method==="Cash"?"warn":"info"}">${esc(o.method)}</span>`:'<span class="muted">—</span>'}</td>
         <td class="n num ${o.kind==="in"?"pos":""}">${o.kind==="in"?"+":""}${gbp(o.amount,1)}</td>
         <td style="white-space:nowrap">${canWrite?`<button class="btn ghost small" data-act="ooedit" data-oid="${esc(o.id)}">Edit</button><button class="btn ghost small danger" data-act="oodel" data-oid="${esc(o.id)}">Remove</button>`:""}</td></tr>`).join("")}
@@ -1708,6 +1838,7 @@ function openForm(col, id, preset={}) {
     const v = rec[f.k] ?? "";
     const idA = `f-${f.k}`;
     let input;
+    if (f.t === "groupcat") { const k = classify(rec, true); return groupCatFields("f", k.g, k.c); }
     if (f.t === "select") { const opts = typeof f.o === "function" ? f.o() : f.o; input = `<select id="${idA}" name="${f.k}">${opts.map(o=>{ const [val,lab]=Array.isArray(o)?o:[o,o]; return `<option value="${esc(val)}" ${String(v)===String(val)?"selected":""}>${esc(lab)}</option>`; }).join("")}</select>`; }
     else if (f.t === "textarea") input = `<textarea id="${idA}" name="${f.k}" placeholder="${esc(f.ph||"")}">${esc(v)}</textarea>`;
     else { const type = f.t==="date"?"date":f.t==="month"?"month":"text"; const im = ["money","pct","number"].includes(f.t)?' inputmode="decimal"':""; input = `<input id="${idA}" name="${f.k}" type="${type}"${im} value="${esc(v)}" placeholder="${esc(f.ph||"")}" ${f.list?`list="${f.list}"`:""} ${f.req?"required":""}>`; }
@@ -1734,7 +1865,7 @@ async function submitForm() {
   const col = form.dataset.col, id = form.dataset.id;
   const sc = SCHEMA[col]; const prev = id ? byId(col,id) || {} : {};
   const data = {...prev}; delete data.id;
-  for (const f of sc.fields) { if (!f.k) continue; const el = form.elements[f.k]; if (!el) continue; let v = el.value.trim();
+  for (const f of sc.fields) { if (f.t === "groupcat") { const k = await readGroupCat("f"); data.bgroup = k.g; data.bcat = k.c; data.group = k.g; data.propertyId = propertyOfGroup(k.g); continue; } if (!f.k) continue; const el = form.elements[f.k]; if (!el) continue; let v = el.value.trim();
     if (["money","pct","number"].includes(f.t)) v = v === "" ? "" : num(v);
     data[f.k] = v; }
   const req = sc.fields.find(f => f.req && !has(data[f.k]));
@@ -1780,6 +1911,9 @@ document.addEventListener("click", async (e) => {
   if (act === "snapshot") { const T = totals(); const mk = monthKey(new Date()); if (await save("snapshots", mk, {net:Math.round(T.net), assets:Math.round(T.assets), liabilities:Math.round(T.liab), propertyEquity:Math.round(T.homeEq+T.rentalEq), investments:Math.round(T.inv+T.pens+T.cashS)})) toast(`Snapshot saved for ${monthLabel(mk)}`); return; }
   if (act === "backup") return backup();
   if (act === "ics") return exportICS();
+  if (act === "cats-open") return catsManageOpen();
+  if (act === "catadd") { const inp = $("#catnew-" + b.dataset.i); const v = (inp && inp.value || "").trim(); if (!v) { inp && inp.focus(); return; } await addCategory(b.dataset.g, v); toast(`Added ${v} to ${b.dataset.g}`); setTimeout(catsManageOpen, 150); return; }
+  if (act === "catdel") { const g = b.dataset.g, c = b.dataset.c; const all = { ...(S.settings.budgetCats || {}) }; for (const gg of bGroups()) if (!all[gg]) all[gg] = bCats(gg); all[g] = bCats(g).filter(x => x !== c); await save("settings", "main", { ...S.settings, budgetCats: all }); toast(`Removed ${c}`); setTimeout(catsManageOpen, 150); return; }
   if (act === "dsave") return docSave();
   if (act === "dcancel") { docPending = null; return render(); }
   if (act === "dfilt") { docFilter = b.dataset.m; return render(); }
@@ -1814,7 +1948,7 @@ document.addEventListener("click", async (e) => {
   if (act === "rentbasis") { rentBasis = b.dataset.m; try{localStorage.setItem("hl.rentBasis",rentBasis);}catch(e){} return render(); }
   if (act === "gorent") { rentMonth = b.dataset.m; return setTab("rent"); }
   if (act === "ooadd") {
-    const it = ooRead("ooN");
+    const it = await ooRead("ooN");
     if (!it.label || !it.amount) { toast("Add what it was and the amount"); (it.label?$("#ooN-amt"):$("#ooN-label")).focus(); return; }
     const item = { id: Date.now().toString(36), ...it };
     if (await ooPut(item)) { toast(`Added ${it.label}${it.date.slice(0,7)!==budgetMonth?` to ${monthLabel(it.date.slice(0,7))}`:""}`); }
@@ -1822,7 +1956,7 @@ document.addEventListener("click", async (e) => {
   }
   if (act === "ooedit") return ooEditOpen(b.dataset.oid);
   if (act === "oosave") {
-    const it = ooRead("ooE");
+    const it = await ooRead("ooE");
     if (!it.label || !it.amount) { toast("Add what it was and the amount"); return; }
     if (await ooPut({ id: b.dataset.oid, ...it }, budgetMonth)) { closeModal(); toast("Saved"); }
     return;
@@ -2131,8 +2265,7 @@ function quickExpenseForm(e) {
       <div class="field wide"><label for="eType">What is it</label><select id="eType">${types.map(([k,l])=>`<option value="${k}" ${k===t?"selected":""}>${l}</option>`).join("")}</select></div>
       <div class="field"><label for="eLabel">Name</label><input id="eLabel" value="${esc(e.label)}"></div>
       <div class="field"><label for="eAmt">Amount (£)</label><input id="eAmt" inputmode="decimal" value="${e.amount ?? ""}"></div>
-      <div class="field"><label for="eGroup">Group</label><input id="eGroup" list="budgetGroups" value="${esc(e.group)}"></div>
-      <div class="field"><label for="eProp">Linked property</label><select id="eProp"><option value="">None</option>${S.properties.map(p=>`<option value="${p.id}" ${p.id===e.propertyId?"selected":""}>${esc(p.name)}</option>`).join("")}</select></div>
+      ${(() => { const k = classify({ group: e.group, propertyId: e.propertyId, label: e.label + " " + (e.text||"") }, e.recurring); return groupCatFields("e", k.g, k.c); })()}
       <div class="field" id="eDayWrap"><label for="eDay">Leaves account on day</label><input id="eDay" inputmode="numeric" value="${e.day || ""}" placeholder="1–31"></div>
       <div class="field" id="eDateWrap"><label for="eDate">Date</label><input type="date" id="eDate" value="${e.date || todayISO()}"></div>
     </div>
@@ -2145,14 +2278,14 @@ function eTypeSync() { const v = $("#eType").value; const rec = v === "bill" || 
 async function quickExpenseSave() {
   const type = $("#eType").value, label = $("#eLabel").value.trim(), amount = num($("#eAmt").value);
   if (!label || !amount) { toast("Add a name and an amount"); return; }
-  const group = $("#eGroup").value.trim(), propertyId = $("#eProp").value;
+  const k = await readGroupCat("e"); const propertyId = propertyOfGroup(k.g);
   if (type === "bill" || type === "income") {
-    const ok = await save("budget", null, { label, type: type === "income" ? "income" : "expense", group: group || (type === "income" ? "Salaries" : "Other bills"), amount, day: num($("#eDay").value) || "", method: type === "income" ? "Salary" : "Direct debit", propertyId, startMonth: monthKey(new Date()), endMonth: "" });
+    const ok = await save("budget", null, { label, type: type === "income" ? "income" : "expense", group: type === "income" ? "Salaries" : k.g, bgroup: type === "income" ? "" : k.g, bcat: type === "income" ? "" : k.c, amount, day: num($("#eDay").value) || "", method: type === "income" ? "Salary" : "Direct debit", propertyId, startMonth: monthKey(new Date()), endMonth: "" });
     if (ok) { closeModal(); toast(`Added ${label}: ${gbp(amount,1)} every month`); }
   } else {
     const date = $("#eDate").value || todayISO(); const mk = date.slice(0,7);
     const cur = (S.months.find(m => m.id === mk) || {}).oneoffs || [];
-    const ok = await saveMonth(mk, { oneoffs: [...cur, { id: Date.now().toString(36), label, amount, kind: type === "oneoffin" ? "in" : "out", date, cat: OO_CATS.includes(group) ? group : ooCatFrom(group, label), propertyId, method: /\bcash\b/i.test((qState&&qState.e&&qState.e.text)||"") ? "Cash" : "Bank", reason: "" }] });
+    const ok = await saveMonth(mk, { oneoffs: [...cur, { id: Date.now().toString(36), label, amount, kind: type === "oneoffin" ? "in" : "out", date, bgroup: k.g, bcat: k.c, cat: k.c, propertyId, method: /\bcash\b/i.test((qState&&qState.e&&qState.e.text)||"") ? "Cash" : "Bank", reason: "" }] });
     if (ok) { closeModal(); toast(`Added ${label}: ${gbp(amount,1)} in ${monthLabel(mk)}`); }
   }
 }
@@ -2258,6 +2391,7 @@ function buildImportRows(tx) {
       for (const t of list) rows.push({ section: isOut ? "one" : "onein", include: false, name: titleCase(txName(t)).slice(0, 40), desc: t.desc, ref: t.ref || "", method: txMethod(t), type: isOut ? "oneoff" : "oneoffin", amount: isOut ? t.out : t.inn, day: +t.date.slice(8,10), date: t.date, group: g.group === "Mortgage" ? "" : g.group, propertyId: g.propertyId, count: 1, months: 1, note: isRentIn ? "Looks like rent, which comes from the Rent tab" : "" });
     }
   }
+  for (const r of rows) { const k = classify({ group: r.group, propertyId: r.propertyId, label: r.name + " " + r.desc }, r.section === "rec"); r.bgroup = k.g; r.bcat = k.c; }
   const ord = { rec: 0, one: 1, recin: 2, onein: 3 };
   return rows.sort((a,b) => ord[a.section]-ord[b.section] || (a.section === "one" || a.section === "onein" ? (a.date < b.date ? -1 : 1) : b.amount - a.amount));
 }
@@ -2283,12 +2417,12 @@ function importRender() {
     const allOn = list.every(([r]) => r.include);
     return `<details class="impsec" ${k==="rec"||k==="one"?"open":""}><summary><b>${sec[k][0]}</b> <span class="muted">${list.length}</span></summary>
       <div class="row" style="justify-content:space-between"><span class="sub">${sec[k][1]}</span><button type="button" class="btn ghost small" data-act="impall" data-sec="${k}" data-on="${allOn?0:1}">${allOn?"Untick all":"Tick all"}</button></div>
-      <div class="tablewrap"><table class="imp"><thead><tr><th></th><th>Name</th><th>Add as</th><th>Group</th><th>Property</th><th class="n">Amount</th><th>${k.startsWith("rec")?"Day":"Date"}</th></tr></thead><tbody>
+      <div class="tablewrap"><table class="imp"><thead><tr><th></th><th>Name</th><th>Add as</th><th>Group</th><th>Category</th><th class="n">Amount</th><th>${k.startsWith("rec")?"Day":"Date"}</th></tr></thead><tbody>
       ${list.map(([r,i]) => `<tr class="${r.include?"":"off"}"><td><input type="checkbox" data-ir="${i}" data-if="include" ${r.include?"checked":""} aria-label="Include ${esc(r.name)}"></td>
         <td><input data-ir="${i}" data-if="name" value="${esc(r.name)}" style="width:170px" aria-label="Name"><div class="sub" title="${esc(r.desc)}">${esc(r.desc.slice(0,38))}${r.count>1?` · ${r.count} payments`:""}${r.section.startsWith("one")&&r.method&&r.method!=="Bank"?` · ${r.method}`:""}</div>${r.note?`<div class="sub" style="color:var(--warn)">${esc(r.note)}</div>`:""}</td>
         <td><select data-ir="${i}" data-if="type" aria-label="Add as">${typeOpts(r)}</select></td>
-        <td><input data-ir="${i}" data-if="group" list="budgetGroups" value="${esc(r.group)}" style="width:130px" aria-label="Group"></td>
-        <td><select data-ir="${i}" data-if="propertyId" aria-label="Property">${propOpts(r)}</select></td>
+        <td><select data-ir="${i}" data-if="bgroup" aria-label="Group">${bGroups().map(g=>`<option ${g===r.bgroup?"selected":""}>${esc(g)}</option>`).join("")}</select></td>
+        <td><select data-ir="${i}" data-if="bcat" aria-label="Category"><option value="">Choose…</option>${(r.bcat && !bCats(r.bgroup).includes(r.bcat) ? [r.bcat, ...bCats(r.bgroup)] : bCats(r.bgroup)).map(c=>`<option ${c===r.bcat?"selected":""}>${esc(c)}</option>`).join("")}</select></td>
         <td class="n"><input class="amt" data-ir="${i}" data-if="amount" inputmode="decimal" value="${r.amount}" aria-label="Amount"></td>
         <td>${(r.type==="bill"||r.type==="income") ? `<input data-ir="${i}" data-if="day" inputmode="numeric" value="${r.day||""}" style="width:52px" aria-label="Day of month">` : `<span class="num">${fmtD(r.date)}</span>`}</td></tr>`).join("")}
       </tbody></table></div></details>`;
@@ -2431,14 +2565,14 @@ async function importSave() {
   const btn = document.querySelector('[data-act="impsave"]'); if (btn) { btn.disabled = true; btn.textContent = "Adding…"; }
   let n = 0;
   for (const r of sel.filter(r => r.type === "bill" || r.type === "income")) {
-    const ok = await save("budget", null, { label: r.name.trim() || "Payment", type: r.type === "income" ? "income" : "expense", group: r.group || (r.type === "income" ? "Salaries" : "Other bills"), amount: num(r.amount), day: num(r.day) || "", method: r.type === "income" ? "Salary" : "Direct debit", propertyId: r.propertyId || "", varies: r.varies ? "yes" : "", startMonth: IMP.from.slice(0,7), endMonth: "", notes: `From statement: ${r.desc}` });
+    const ok = await save("budget", null, { label: r.name.trim() || "Payment", type: r.type === "income" ? "income" : "expense", group: r.type === "income" ? "Salaries" : r.bgroup, bgroup: r.type === "income" ? "" : r.bgroup, bcat: r.type === "income" ? "" : r.bcat, amount: num(r.amount), day: num(r.day) || "", method: r.type === "income" ? "Salary" : "Direct debit", propertyId: r.type === "income" ? "" : propertyOfGroup(r.bgroup), varies: r.varies ? "yes" : "", startMonth: IMP.from.slice(0,7), endMonth: "", notes: `From statement: ${r.desc}` });
     if (ok) n++;
   }
   const byMonth = {};
   for (const r of sel.filter(r => r.type === "oneoff" || r.type === "oneoffin")) (byMonth[r.date.slice(0,7)] = byMonth[r.date.slice(0,7)] || []).push(r);
   for (const [mk, list] of Object.entries(byMonth)) {
     const cur = (S.months.find(m => m.id === mk) || {}).oneoffs || [];
-    const add = list.map((r, j) => ({ id: Date.now().toString(36) + j, label: r.name.trim() || "Payment", amount: num(r.amount), kind: r.type === "oneoffin" ? "in" : "out", date: r.date, cat: ooCatFrom(r.group, r.desc), propertyId: r.propertyId || "", method: IMP.cardStyle ? "Card" : (r.method || "Bank"), reason: r.ref || "" }));
+    const add = list.map((r, j) => ({ id: Date.now().toString(36) + j, label: r.name.trim() || "Payment", amount: num(r.amount), kind: r.type === "oneoffin" ? "in" : "out", date: r.date, bgroup: r.bgroup, bcat: r.bcat, cat: r.bcat, propertyId: propertyOfGroup(r.bgroup), method: IMP.cardStyle ? "Card" : (r.method || "Bank"), reason: r.ref || "" }));
     if (await saveMonth(mk, { oneoffs: [...cur, ...add] })) n += list.length;
   }
   closeModal(); toast(`Added ${n} item${n===1?"":"s"} to your budget`);
@@ -2449,6 +2583,7 @@ document.addEventListener("change", async (e) => {
   if (el.dataset && el.dataset.ir !== undefined && IMP) {
     const r = IMP.rows[+el.dataset.ir]; const f = el.dataset.if;
     r[f] = el.type === "checkbox" ? el.checked : el.value;
+    if (f === "bgroup") { r.bcat = mapCat(r.bgroup, r.bcat, r.name + " " + r.desc, r.type === "bill"); importRender(); }
     if (f === "type" || f === "include") importRender();
     else if (f === "amount") importRender();
   }
