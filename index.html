@@ -2473,6 +2473,51 @@ function rentMonthFor(tid, date) {
   for (const off of [-1, 0, 1]) { const m = new Date(d.getFullYear(), d.getMonth() + off, day); const diff = Math.abs(m - d); if (diff < bd) { bd = diff; best = m; } }
   return monthKey(best);
 }
+// ---------- does this statement line match something already in the budget? ----------
+const MATCH_STOP = new Set(["payment","payments","direct","debit","debits","from","statement","monthly","limited","account","bill","bills","online","transfer","card","plc","ltd","the","and","for","pymts","pymt","mbp"]);
+const mTokens = s => new Set(String(s || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(w => w.length >= 3 && !MATCH_STOP.has(w) && !/^\d+$/.test(w)));
+const overlap = (a, b) => { let n = 0; for (const w of a) if (b.has(w)) n++; return n; };
+function existingTargets(kind) {
+  const out = [];
+  if (kind === "out") {
+    for (const l of S.budget.filter(l => l.type !== "income")) out.push({ id: "b:" + l.id, label: l.label, amount: num(l.amount), day: num(l.day), varies: !!l.varies, tokens: mTokens(l.label + " " + (l.notes || "")), what: "regular bill" });
+    for (const p of S.properties.filter(p => num(p.monthlyPayment) > 0)) out.push({ id: "m:" + p.id, label: `${p.name} mortgage`, amount: num(p.monthlyPayment), day: 0, varies: false, tokens: mTokens((p.lender || "") + " mortgage"), what: "mortgage", mortgage: true });
+    for (const d of S.debts.filter(d => num(d.monthly) > 0)) out.push({ id: "d:" + d.id, label: d.name, amount: num(d.monthly), day: 0, varies: false, tokens: mTokens(d.name + " " + (d.kind || "")), what: "loan" });
+  } else {
+    for (const l of S.budget.filter(l => l.type === "income")) out.push({ id: "b:" + l.id, label: l.label, amount: num(l.amount), day: num(l.day), varies: true, tokens: mTokens(l.label + " " + (l.notes || "")), what: "regular income" });
+  }
+  return out;
+}
+function findExisting(t, kind) {
+  const amt = kind === "out" ? t.out : t.inn;
+  const targets = existingTargets(kind);
+  const map = S.settings.billMap || {};
+  const remembered = map[merchantKey(t.name || t.desc)];
+  if (remembered) { const hit = targets.find(x => x.id === remembered); if (hit) return { ...hit, how: "remembered" }; }
+  const toks = mTokens(t.desc);
+  const day = +t.date.slice(8, 10);
+  const looksMortgage = MORTGAGE_ONLY.test(t.desc) || (LENDERS.test(t.desc) && amt >= 300);
+  let best = null, bs = 0;
+  for (const x of targets) {
+    const name = overlap(toks, x.tokens);
+    const close = x.amount ? Math.abs(amt - x.amount) / x.amount : 1;
+    const dayOk = x.day ? Math.min(Math.abs(day - x.day), 31 - Math.abs(day - x.day)) <= 3 : false;
+    let s = 0;
+    if (name) s += 3;
+    if (close <= 0.02) s += 2; else if (close <= 0.15 || x.varies) s += 1;
+    if (dayOk) s += 1;
+    if (x.mortgage && looksMortgage) s += close <= 0.05 ? 3 : 1;
+    if (/^(DD|SO|D\/D|S\/O|STO|DDR)$/.test(t.type || "")) s += 0.5;
+    const ok = name ? true : (x.mortgage ? (looksMortgage && close <= 0.05) || (close <= 0.01) : close <= 0.02 && (dayOk || /^(DD|SO)$/.test(t.type || "")));
+    if (ok && s > bs) { bs = s; best = x; }
+  }
+  return best ? { ...best, how: "auto" } : null;
+}
+function targetOptions(kind, sel) {
+  const t = existingTargets(kind);
+  const g = {}; for (const x of t) (g[x.what] = g[x.what] || []).push(x);
+  return `<option value="">Choose what it is…</option>` + Object.entries(g).map(([w, l]) => `<optgroup label="${esc(w[0].toUpperCase() + w.slice(1))}s">${l.map(x => `<option value="${x.id}" ${x.id === sel ? "selected" : ""}>${esc(x.label)}${x.amount ? ` · ${gbp(x.amount)}` : ""}</option>`).join("")}</optgroup>`).join("");
+}
 function buildImportRows(tx, defGroup) {
   const rows = [];
   const payee = S.settings.payeeMap || {};
@@ -2484,6 +2529,7 @@ function buildImportRows(tx, defGroup) {
       type: tid && !own ? "rent" : salary ? "income" : "oneoffin", rentMonth: tid ? rentMonthFor(tid, t.date) : t.date.slice(0,7),
       note: own ? "Looks like a transfer between your own accounts" : tid || defGroup === homeGroup() ? "" : "If this is rent, choose “Rent from tenant” and pick who paid it. It will be remembered." };
     const k = classify({ propertyId: tid ? (byId("tenancies", tid) || {}).propertyId : "", label: r.name }, false); r.bgroup = defGroup || k.g; r.bcat = "";
+    if (!tid && !own) { const ex = findExisting(t, "in"); if (ex) { r.type = "existing"; r.target = ex.id; r.include = true; r.txs = [{ date: t.date, amount: t.inn }]; r.note = `Already in your budget as “${ex.label}”. Ticked: that month's figure is set to this amount.`; } }
     rows.push(r);
   }
   // money out: group repeating payments by payee; keep separate payments made more than once a month apart
@@ -2519,7 +2565,14 @@ function buildImportRows(tx, defGroup) {
     const remembered = payee[payKey(t0)];
     const note = already ? "Already in your budget" : isMortgage ? "Looks like a mortgage. These are already counted from Properties" : own ? "Looks like a transfer between your own accounts" : saving ? "Money moved to savings, not spending" : "";
     const varies = Math.max(...amounts) > Math.min(...amounts) * 1.1;
+    const ex = findExisting(t0, "out");
     const base = { desc: t0.desc, ref: t0.ref || "", method: txMethod(t0), propertyId: g.propertyId, group: g.group === "Mortgage" ? "" : g.group, note, remembered };
+    if (ex && !own && !saving) {
+      const isB = ex.id.startsWith("b:");
+      rows.push({ ...base, section: "match", key: list.map(txKey).join("~"), include: isB, name: titleCase(txName(t0)).slice(0, 40) + (nth ? ` (${nth})` : ""), type: "existing", target: ex.id, amount: Math.round(last*100)/100, day: dayMode, date: t0.date, count: list.length, months: months.size, txs: list.map(t => ({ date: t.date, amount: t.out })),
+        note: `Already in your budget as “${ex.label}”${ex.amount ? ` (${gbp(ex.amount,1)})` : ""}.${isB ? " Ticked: that month's figure is set to the statement amount; nothing new is added." : " Nothing will be added."}` });
+      continue;
+    }
     if (recurring) rows.push({ ...base, section: "rec", key: list.map(txKey).join("~"), include: !already && !isMortgage && !own && !saving, name: titleCase(txName(t0)).slice(0, 40) + (nth ? ` (${nth})` : ""), type: "bill", amount: Math.round(last*100)/100, day: dayMode, date: t0.date, count: list.length, months: months.size, varies, note: note || (varies ? "Amount changes month to month" : "") });
     else for (const t of list) rows.push({ ...base, section: "one", key: txKey(t), include: !isMortgage && !own && !saving && !!remembered, name: titleCase(txName(t)).slice(0, 40), desc: t.desc, ref: t.ref || "", method: txMethod(t), type: "oneoff", amount: t.out, day: +t.date.slice(8,10), date: t.date, count: 1, months: 1 });
   }
@@ -2534,7 +2587,7 @@ function buildImportRows(tx, defGroup) {
   const seenOne = new Set(S.months.flatMap(m => (m.oneoffs || []).map(o => o.srcKey).filter(Boolean)));
   const seenRent = new Set(S.rent.flatMap(r => r.bankTx || []));
   for (const r of rows) if ((r.section === "one" && seenOne.has(r.key)) || (r.section === "in" && (seenRent.has(r.key) || seenOne.has(r.key)))) { r.include = false; r.dup = true; r.note = "Already imported"; }
-  const ord = { in: 0, rec: 1, one: 2 };
+  const ord = { in: 0, match: 1, rec: 2, one: 3 };
   return rows.sort((a,b) => ord[a.section]-ord[b.section] || (a.section === "rec" ? b.amount - a.amount : (a.date < b.date ? -1 : 1)));
 }
 // The group most of this statement's spending belongs to: the property whose tenants pay into it, otherwise your home.
@@ -2563,9 +2616,10 @@ function importRender() {
   if (!IMP) return;
   const sec = {
     in: ["Money in", "Rent from tenants is matched automatically; choose the tenant for any it couldn't match. Untick transfers between your own accounts."],
-    rec: ["Repeating payments out", "Suggested as monthly bills. Untick anything you don't want."],
+    match: ["Already in your budget", "These match bills, mortgages or loans you've already set up, so they won't be added again. Ticked lines just update that month's figure to the actual amount."],
+    rec: ["New repeating payments out", "Not in your budget yet. Suggested as monthly bills; untick anything you don't want."],
     one: ["Other payments out", "Tick the ones to add as one-off spends."] };
-  const typeOpts = r => (r.section === "in" ? [["rent","Rent from tenant"],["income","Monthly income"],["oneoffin","One-off money in"]] : [["bill","Monthly bill"],["oneoff","One-off spend"]]).map(([k,l]) => `<option value="${k}" ${r.type===k?"selected":""}>${l}</option>`).join("");
+  const typeOpts = r => (r.section === "in" ? [["rent","Rent from tenant"],["existing","Already in budget"],["income","New monthly income"],["oneoffin","One-off money in"]] : [["existing","Already in budget"],["bill","New monthly bill"],["oneoff","One-off spend"]]).map(([k,l]) => `<option value="${k}" ${r.type===k?"selected":""}>${l}</option>`).join("");
   const catSel = (r, i) => `<select data-ir="${i}" data-if="bcat" aria-label="Category"><option value="">Choose…</option>${(r.bcat && !bCats(r.bgroup).includes(r.bcat) ? [r.bcat, ...bCats(r.bgroup)] : bCats(r.bgroup)).map(c=>`<option ${c===r.bcat?"selected":""}>${esc(c)}</option>`).join("")}</select>`;
   const grpSel = (r, i) => `<select data-ir="${i}" data-if="bgroup" aria-label="Group">${bGroups().map(g=>`<option ${g===r.bgroup?"selected":""}>${esc(g)}</option>`).join("")}</select>`;
   const selected = IMP.rows.filter(r => r.include);
@@ -2574,14 +2628,15 @@ function importRender() {
     const allOn = list.every(([r]) => r.include || r.dup);
     return `<details class="impsec" open><summary><b>${sec[k][0]}</b> <span class="muted">${list.length}</span></summary>
       <div class="row" style="justify-content:space-between"><span class="sub">${sec[k][1]}</span><button type="button" class="btn ghost small" data-act="impall" data-sec="${k}" data-on="${allOn?0:1}">${allOn?"Untick all":"Tick all"}</button></div>
-      <div class="tablewrap"><table class="imp"><thead><tr><th></th><th>Name</th><th>Add as</th><th>${k==="in"?"Tenant / group":"Group"}</th><th>${k==="in"?"For month / category":"Category"}</th><th class="n">Amount</th><th>${k==="rec"?"Day":"Date"}</th></tr></thead><tbody>
+      <div class="tablewrap"><table class="imp"><thead><tr><th></th><th>Name</th><th>Add as</th><th>${k==="in"?"Tenant / group":k==="match"?"Matches":"Group"}</th><th>${k==="in"?"For month / category":k==="match"?"":"Category"}</th><th class="n">Amount</th><th>${k==="rec"||k==="match"?"Day":"Date"}</th></tr></thead><tbody>
       ${list.map(([r,i]) => `<tr class="${r.include?"":"off"}"><td><input type="checkbox" data-ir="${i}" data-if="include" ${r.include?"checked":""} aria-label="Include ${esc(r.name)}"></td>
         <td><input data-ir="${i}" data-if="name" value="${esc(r.name)}" style="width:170px" aria-label="Name"><div class="sub" title="${esc(r.desc)}">${esc(r.desc.slice(0,38))}${r.count>1?` · ${r.count} payments`:""}${r.method&&r.method!=="Bank"?` · ${r.method}`:""}</div>${r.note?`<div class="sub" style="color:var(--warn)">${esc(r.note)}</div>`:""}</td>
         <td><select data-ir="${i}" data-if="type" aria-label="Add as">${typeOpts(r)}</select></td>
         ${r.type === "rent" ? `<td><select data-ir="${i}" data-if="tenantId" aria-label="Tenant">${tenantOptions(r.tenantId)}</select></td><td><input type="month" data-ir="${i}" data-if="rentMonth" value="${r.rentMonth}" aria-label="Rent for month"></td>`
+          : r.type === "existing" ? `<td colspan="2"><select data-ir="${i}" data-if="target" aria-label="Already in budget as" style="max-width:100%">${targetOptions(r.section === "in" ? "in" : "out", r.target)}</select></td>`
           : r.type === "income" ? `<td colspan="2" class="sub">Added to Money in each month</td>` : `<td>${grpSel(r,i)}</td><td>${catSel(r,i)}</td>`}
         <td class="n"><input class="amt" data-ir="${i}" data-if="amount" inputmode="decimal" value="${r.amount}" aria-label="Amount"></td>
-        <td>${(r.type==="bill"||r.type==="income") ? `<input data-ir="${i}" data-if="day" inputmode="numeric" value="${r.day||""}" style="width:52px" aria-label="Day of month">` : `<span class="num">${fmtD(r.date)}</span>`}</td></tr>`).join("")}
+        <td>${r.type==="existing" ? `<span class="num">${r.count>1?`${r.count}×`:fmtD(r.date)}</span>` : (r.type==="bill"||r.type==="income") ? `<input data-ir="${i}" data-if="day" inputmode="numeric" value="${r.day||""}" style="width:52px" aria-label="Day of month">` : `<span class="num">${fmtD(r.date)}</span>`}</td></tr>`).join("")}
       </tbody></table></div></details>`;
   }).join("");
   const sum = t => selected.filter(r => r.type === t).reduce((a,r)=>a+num(r.amount),0);
@@ -2590,8 +2645,8 @@ function importRender() {
     <div class="row"><label class="sub" for="impDef" style="font-weight:600">Spending on this account is mostly for</label><select id="impDef" class="input">${bGroups().map(g=>`<option ${g===IMP.defGroup?"selected":""}>${esc(g)}</option>`).join("")}</select><span class="sub">Changes the group for every payment out you haven't set yourself.</span></div>
     ${html}${datalists()}
     <div class="row" style="justify-content:space-between;position:sticky;bottom:0;background:var(--surface);padding-block:10px;border-top:1px solid var(--line)">
-      <span class="sub"><b>${selected.length}</b> selected · rent ${gbp(sum("rent"))} (${rentN}) · monthly bills ${gbp(sum("bill"))} · one-offs ${gbp(sum("oneoff"))}</span>
-      <div class="row"><button type="button" class="btn" data-act="close">Cancel</button><button type="button" class="btn primary" data-act="impsave" ${selected.length?"":"disabled"}>Add ${selected.length}</button></div>
+      <span class="sub"><b>${selected.length}</b> selected · rent ${gbp(sum("rent"))} (${rentN}) · new monthly bills ${gbp(sum("bill"))} · one-offs ${gbp(sum("oneoff"))} · already in budget ${selected.filter(r=>r.type==="existing").length}</span>
+      <div class="row"><button type="button" class="btn" data-act="close">Cancel</button><button type="button" class="btn primary" data-act="impsave" ${selected.length?"":"disabled"}>Save ${selected.length}</button></div>
     </div>`;
 }
 // ---------- PDF statements ----------
@@ -2727,6 +2782,8 @@ async function importLoad(file, flip) {
 async function importSave() {
   if (!IMP) return;
   const sel = IMP.rows.filter(r => r.include && num(r.amount));
+  const noTarget = sel.filter(r => r.type === "existing" && !r.target);
+  if (noTarget.length) { toast(`Choose which budget item ${noTarget.length>1?"these match":"this matches"}, or untick ${noTarget.length>1?"them":"it"}`); return; }
   const noTenant = sel.filter(r => r.type === "rent" && !r.tenantId);
   if (noTenant.length) { toast(`Choose the tenant for ${noTenant.length} rent payment${noTenant.length>1?"s":""}, or untick ${noTenant.length>1?"them":"it"}`); return; }
   const btn = document.querySelector('[data-act="impsave"]'); if (btn) { btn.disabled = true; btn.textContent = "Adding…"; }
@@ -2744,6 +2801,25 @@ async function importSave() {
     if (await save("rent", rentDocId(t.id, mk), d)) { n++; rentN++; }
     payerMap[merchantKey(r.desc)] = t.id;
   }
+  // 1b. already in the budget: remember the link, and set that month's figure to the actual amount
+  const billMap = { ...(S.settings.billMap || {}) };
+  const ovByMonth = {};
+  for (const r of sel.filter(r => r.type === "existing")) {
+    if (!r.target) continue;
+    billMap[merchantKey(r.desc)] = r.target;
+    if (!r.target.startsWith("b:")) continue;
+    const lid = r.target.slice(2); const line = byId("budget", lid); if (!line) continue;
+    for (const x of (r.txs || [{ date: r.date, amount: num(r.amount) }])) {
+      const mk = x.date.slice(0, 7); const amt = r.txs && r.txs.length > 1 ? x.amount : num(r.amount);
+      (ovByMonth[mk] = ovByMonth[mk] || {})[lid] = Math.round(((ovByMonth[mk] || {})[lid] || 0) * 100 + amt * 100) / 100;
+    }
+    n++;
+  }
+  for (const [mk, ov] of Object.entries(ovByMonth)) {
+    const cur = { ...((S.months.find(m => m.id === mk) || {}).overrides || {}) };
+    for (const [lid, v] of Object.entries(ov)) { const line = byId("budget", lid); if (Math.abs(v - num(line && line.amount)) < 0.005) delete cur[lid]; else cur[lid] = v; }
+    await saveMonth(mk, { overrides: cur });
+  }
   // 2. regular bills and income -> Monthly budget
   for (const r of sel.filter(r => r.type === "bill" || r.type === "income")) {
     const ok = await save("budget", null, { label: r.name.trim() || "Payment", type: r.type === "income" ? "income" : "expense", group: r.type === "income" ? "Salaries" : r.bgroup, bgroup: r.type === "income" ? "" : r.bgroup, bcat: r.type === "income" ? "" : r.bcat, amount: num(r.amount), day: num(r.day) || "", method: r.type === "income" ? "Salary" : "Direct debit", propertyId: r.type === "income" ? "" : propertyOfGroup(r.bgroup), varies: r.varies ? "yes" : "", startMonth: IMP.from.slice(0,7), endMonth: "", notes: `From statement: ${r.desc}` });
@@ -2760,8 +2836,8 @@ async function importSave() {
     if (add.length && await saveMonth(mk, { oneoffs: [...cur, ...add] })) n += add.length;
     for (const r of list) if (r.type === "oneoff" && r.bcat) payeeMap[merchantKey(r.desc)] = { g: r.bgroup, c: r.bcat };
   }
-  await saveSettings({ payerMap, payeeMap });
-  closeModal(); toast(`Added ${n} item${n===1?"":"s"}${rentN ? `, including ${rentN} rent payment${rentN>1?"s":""}` : ""}`);
+  await saveSettings({ payerMap, payeeMap, billMap });
+  closeModal(); toast(`Saved ${n} item${n===1?"":"s"}${rentN ? `, including ${rentN} rent payment${rentN>1?"s":""}` : ""}. Nothing already in your budget was added twice.`);
 }
 document.addEventListener("change", async (e) => {
   const el = e.target;
@@ -2773,7 +2849,8 @@ document.addEventListener("change", async (e) => {
     if (f === "bgroup" || f === "bcat") r.touched = true;
     if (f === "bgroup") { r.bcat = mapCat(r.bgroup, r.bcat, r.name + " " + r.desc, r.type === "bill"); importRender(); }
     if (f === "tenantId") { if (r.tenantId) { r.rentMonth = rentMonthFor(r.tenantId, r.date); r.include = true; } importRender(); }
-    if (f === "type") { if (r.type === "rent" && r.tenantId) r.rentMonth = rentMonthFor(r.tenantId, r.date); if (r.type !== "rent" && !r.bgroup) r.bgroup = IMP.defGroup; importRender(); }
+    if (f === "target" && r.target) { r.include = true; importRender(); }
+    if (f === "type") { if (r.type === "existing" && !r.target) { const ex = findExisting({ desc: r.desc, name: r.name, date: r.date, out: r.section === "in" ? 0 : num(r.amount), inn: r.section === "in" ? num(r.amount) : 0, type: "" }, r.section === "in" ? "in" : "out"); if (ex) r.target = ex.id; } if (r.type === "rent" && r.tenantId) r.rentMonth = rentMonthFor(r.tenantId, r.date); if (r.type !== "rent" && !r.bgroup) r.bgroup = IMP.defGroup; importRender(); }
     else if (f === "include" || f === "amount") importRender();
   }
 });
