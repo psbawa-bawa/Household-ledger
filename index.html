@@ -2620,6 +2620,15 @@ function tenantOptions(sel) {
   const groups = S.properties.map(p => [p, S.tenancies.filter(t => t.propertyId === p.id).sort((a,b)=>(isCurrent(b)?1:0)-(isCurrent(a)?1:0) || (a.room||"").localeCompare(b.room||"",undefined,{numeric:true}))]).filter(([,l]) => l.length);
   return `<option value="">Choose tenant…</option>` + groups.map(([p, l]) => `<optgroup label="${esc(p.name)}">${l.map(t => `<option value="${t.id}" ${t.id===sel?"selected":""}>${esc(t.tenantName)}${t.room?` · ${esc(t.room)}`:""}${isCurrent(t)?"":" (moved out)"}</option>`).join("")}</optgroup>`).join("");
 }
+function rentImportNote(r) {
+  if (!r.tenantId || !r.rentMonth) return "";
+  const prev = rentFor(r.tenantId, r.rentMonth); if (!prev || !num(prev.received)) return "";
+  if ((prev.bankTx || []).includes(r.key)) return "";
+  const R = num(prev.received), B = num(prev.bankSum);
+  if (prev.method === "Cash" && R > B) return `<div class="sub" style="color:var(--info)">${gbp(R - B,1)} cash already recorded for ${monthShort(r.rentMonth)}; this bank payment is added on top.</div>`;
+  const after = Math.max(R, B + num(r.amount));
+  return `<div class="sub" style="color:var(--good)">${gbp(R,1)} already recorded for ${monthShort(r.rentMonth)}. ${after > R ? `This brings it to ${gbp(after,1)}.` : "This confirms it; nothing is added."}</div>`;
+}
 function importRender() {
   if (!IMP) return;
   const sec = {
@@ -2640,7 +2649,7 @@ function importRender() {
       ${list.map(([r,i]) => `<tr class="${r.include?"":"off"}"><td><input type="checkbox" data-ir="${i}" data-if="include" ${r.include?"checked":""} aria-label="Include ${esc(r.name)}"></td>
         <td><input data-ir="${i}" data-if="name" value="${esc(r.name)}" style="width:170px" aria-label="Name"><div class="sub" title="${esc(r.desc)}">${esc(r.desc.slice(0,38))}${r.count>1?` · ${r.count} payments`:""}${r.method&&r.method!=="Bank"?` · ${r.method}`:""}</div>${r.note?`<div class="sub" style="color:var(--warn)">${esc(r.note)}</div>`:""}</td>
         <td><select data-ir="${i}" data-if="type" aria-label="Add as">${typeOpts(r)}</select></td>
-        ${r.type === "rent" ? `<td><select data-ir="${i}" data-if="tenantId" aria-label="Tenant">${tenantOptions(r.tenantId)}</select></td><td><input type="month" data-ir="${i}" data-if="rentMonth" value="${r.rentMonth}" aria-label="Rent for month"></td>`
+        ${r.type === "rent" ? `<td><select data-ir="${i}" data-if="tenantId" aria-label="Tenant">${tenantOptions(r.tenantId)}</select>${rentImportNote(r)}</td><td><input type="month" data-ir="${i}" data-if="rentMonth" value="${r.rentMonth}" aria-label="Rent for month"></td>`
           : (r.type === "depin" || r.type === "depret") ? `<td><select data-ir="${i}" data-if="tenantId" aria-label="Tenant">${tenantOptions(r.tenantId)}</select></td><td class="sub">${r.type === "depin" ? "Recorded as deposit held" : "Recorded as deposit returned"}${r.tenantId ? (() => { const t = byId("tenancies", r.tenantId); return t ? ` · deposit ${gbp(t.deposit||0)}${num(t.depositReturned) ? `, returned ${gbp(t.depositReturned)}` : ""}` : ""; })() : ""}</td>`
           : r.type === "existing" ? `<td colspan="2"><select data-ir="${i}" data-if="target" aria-label="Already in budget as" style="max-width:100%">${targetOptions(r.section === "in" ? "in" : "out", r.target)}</select></td>`
           : r.type === "income" ? `<td colspan="2" class="sub">Added to Money in each month</td>` : `<td>${grpSel(r,i)}</td><td>${catSel(r,i)}</td>`}
@@ -2805,8 +2814,13 @@ async function importSave() {
     const mk = r.rentMonth || r.date.slice(0,7);
     const prev = rentFor(t.id, mk) || {};
     if ((prev.bankTx || []).includes(r.key)) continue;
+    // Rent you'd already entered by hand is confirmed by the bank payment, not added to.
+    // Only cash you recorded is kept on top, because cash never shows on the statement.
+    const R = num(prev.received), B = num(prev.bankSum), newB = Math.round((B + num(r.amount)) * 100) / 100;
+    const manualCash = prev.method === "Cash" && R > B ? R - B : 0;
+    const received = Math.round((manualCash ? manualCash + newB : Math.max(R, newB)) * 100) / 100;
     const d = { tenancyId: t.id, propertyId: t.propertyId, month: mk, due: has(prev.due) ? num(prev.due) : num(t.rent),
-      received: Math.round((num(prev.received) + num(r.amount)) * 100) / 100, method: "Bank", date: r.date, note: prev.note || "", bankTx: [...(prev.bankTx || []), r.key] };
+      received, bankSum: newB, method: manualCash ? "Cash" : "Bank", date: r.date, note: prev.note || "", bankTx: [...(prev.bankTx || []), r.key] };
     if (await save("rent", rentDocId(t.id, mk), d)) { n++; rentN++; }
     payerMap[merchantKey(r.desc)] = t.id;
   }
