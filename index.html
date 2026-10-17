@@ -1922,29 +1922,37 @@ const CHECK_REMOVE = {
   "HMO": [/fire alarm test|weekly fire/i, /legionella/i],
   "Home (where we live)": [/home insurance|contents insurance/i],
 };
+// Which checklist a property uses: by name first (so it works whatever "Type" is set to), then by type.
+function templateKey(p) {
+  const n = String(p.name || "") + " " + String(p.address || "");
+  if (/^Home/.test(p.kind || "") || /read place/i.test(n)) return "Home (where we live)";
+  if (/renaissance/i.test(n)) return "Single let";
+  if (/nene/i.test(n)) return "HMO";
+  return CHECKS[p.kind] ? p.kind : null;
+}
 async function removeUnwanted() {
-  const done = (S.settings && S.settings.checklistV3) || {};
-  const todo = S.properties.filter(p => !done[p.id] && CHECK_REMOVE[p.kind]);
+  const done = (S.settings && S.settings.checklistV4) || {};
+  const todo = S.properties.filter(p => !done[p.id] && CHECK_REMOVE[templateKey(p)]);
   if (!todo.length) return false;
   for (const p of todo) {
     for (const c of S.checks.filter(c => c.propertyId === p.id)) {
       if (/emergency light/i.test(c.label || "")) continue;
-      if (CHECK_REMOVE[p.kind].some(re => re.test(c.label || ""))) await remove("checks", c.id);
+      if (CHECK_REMOVE[templateKey(p)].some(re => re.test(c.label || ""))) await remove("checks", c.id);
     }
     done[p.id] = true;
   }
-  await save("settings", "main", { ...S.settings, checklistV3: done });
+  await save("settings", "main", { ...S.settings, checklistV4: done });
   return true;
 }
 async function syncChecklists() {
   if (checklistSyncing || !canWrite || !db) return;
   const done = (S.settings && S.settings.checklistV2) || {};
-  const todo = S.properties.filter(p => !done[p.id] && CHECKS[p.kind]);
+  const todo = S.properties.filter(p => !done[p.id] && CHECKS[templateKey(p)]);
   if (!todo.length) { checklistSyncing = true; try { await removeUnwanted(); } finally { checklistSyncing = false; } return; }
   checklistSyncing = true;
   try {
     for (const p of todo) {
-      const want = CHECKS[p.kind];
+      const want = CHECKS[templateKey(p)];
       const mine = S.checks.filter(c => c.propertyId === p.id);
       const used = new Set();
       for (const [label, repeat] of want) {
@@ -1962,7 +1970,8 @@ async function syncChecklists() {
   } finally { checklistSyncing = false; }
 }
 async function seedChecks(pid, kind) {
-  const list = CHECKS[kind] || CHECKS["Single let"];
+  const pr = byId("properties", pid);
+  const list = CHECKS[(pr && templateKey(pr)) || kind] || CHECKS["Single let"];
   for (const [label, repeat] of list) await save("checks", null, {propertyId:pid, label, repeat, due:"", lastDone:""});
 }
 
