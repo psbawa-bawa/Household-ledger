@@ -2487,7 +2487,7 @@ function matchTenant(t) {
 // Which month a rent payment is for: the month whose rent day is closest to the payment date.
 function rentMonthFor(tid, date) {
   const t = byId("tenancies", tid); const day = Math.min(num(t && t.rentDay) || 1, 28);
-  const d = parseD(date); let best = null, bd = 1e9;
+  const d = parseD(date); if (!d) return monthKey(new Date()); let best = d, bd = Infinity;
   for (const off of [-1, 0, 1]) { const m = new Date(d.getFullYear(), d.getMonth() + off, day); const diff = Math.abs(m - d); if (diff < bd) { bd = diff; best = m; } }
   return monthKey(best);
 }
