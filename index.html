@@ -731,6 +731,12 @@ const SCHEMA = {
 };
 
 // ---------- data writes ----------
+// Changes only the given Settings fields. Never runs before Settings have loaded, so nothing gets overwritten.
+async function saveSettings(fields) {
+  if (!S.loaded.settings || !db) return false;
+  if (S.settingsExists) return patch("settings", "main", fields);
+  return save("settings", "main", { ...S.settings, ...fields });
+}
 async function save(col, id, data) {
   if (!db) { toast("Not connected — sign in to save"); return false; }
   const clean = {}; for (const [k,v] of Object.entries(data)) if (v !== undefined) clean[k] = v;
@@ -843,7 +849,7 @@ function draw() {
   const v = $("#view");
   const scrollY = window.scrollY;
   if (!db) { v.innerHTML = connMsg; return; }
-  const ready = COLS.every(c => S.loaded[c]);
+  const ready = COLS.every(c => S.loaded[c]) && S.loaded.settings;
   if (!ready) { v.innerHTML = `<div class="empty">Loading your figures…</div>`; return; }
   maybeAutoSnapshot(T); syncChecklists();
   v.innerHTML = (VIEWS[tab] || VIEWS.overview)(T) + datalists();
@@ -1218,7 +1224,7 @@ async function addCategory(g, c) {
   const all = { ...(S.settings.budgetCats || {}) };
   for (const gg of bGroups()) if (!all[gg]) all[gg] = bCats(gg);
   all[g] = [...cats, c];
-  await save("settings", "main", { ...S.settings, budgetCats: all });
+  await saveSettings({ budgetCats: all });
   return c;
 }
 async function readGroupCat(pfx) {
@@ -1941,11 +1947,11 @@ async function removeUnwanted() {
     }
     done[p.id] = true;
   }
-  await save("settings", "main", { ...S.settings, checklistV4: done });
+  await saveSettings({ checklistV4: done });
   return true;
 }
 async function syncChecklists() {
-  if (checklistSyncing || !canWrite || !db) return;
+  if (checklistSyncing || !canWrite || !db || !S.loaded.settings) return;
   const done = (S.settings && S.settings.checklistV2) || {};
   const todo = S.properties.filter(p => !done[p.id] && CHECKS[templateKey(p)]);
   if (!todo.length) { checklistSyncing = true; try { await removeUnwanted(); } finally { checklistSyncing = false; } return; }
@@ -1965,7 +1971,7 @@ async function syncChecklists() {
       if (p.kind === "HMO" && !p.address && /nene/i.test(p.name || "")) await patch("properties", p.id, { address: "113 Nene Gardens" });
       done[p.id] = true;
     }
-    await save("settings", "main", { ...S.settings, checklistV2: done });
+    await saveSettings({ checklistV2: done });
     await removeUnwanted();
   } finally { checklistSyncing = false; }
 }
@@ -2003,7 +2009,7 @@ document.addEventListener("click", async (e) => {
   if (act === "tenout") { const t = byId("tenancies", b.dataset.id); if (!t) return; if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Tap again to confirm"; return; } if (await patch("tenancies", t.id, { status: "Moved out" })) toast(`${t.tenantName} marked as moved out. Remember to sort out their deposit.`); return; }
   if (act === "cats-open") return catsManageOpen();
   if (act === "catadd") { const inp = $("#catnew-" + b.dataset.i); const v = (inp && inp.value || "").trim(); if (!v) { inp && inp.focus(); return; } await addCategory(b.dataset.g, v); toast(`Added ${v} to ${b.dataset.g}`); setTimeout(catsManageOpen, 150); return; }
-  if (act === "catdel") { const g = b.dataset.g, c = b.dataset.c; const all = { ...(S.settings.budgetCats || {}) }; for (const gg of bGroups()) if (!all[gg]) all[gg] = bCats(gg); all[g] = bCats(g).filter(x => x !== c); await save("settings", "main", { ...S.settings, budgetCats: all }); toast(`Removed ${c}`); setTimeout(catsManageOpen, 150); return; }
+  if (act === "catdel") { const g = b.dataset.g, c = b.dataset.c; const all = { ...(S.settings.budgetCats || {}) }; for (const gg of bGroups()) if (!all[gg]) all[gg] = bCats(gg); all[g] = bCats(g).filter(x => x !== c); await saveSettings({ budgetCats: all }); toast(`Removed ${c}`); setTimeout(catsManageOpen, 150); return; }
   if (act === "dsave") return docSave();
   if (act === "dcancel") { docPending = null; return render(); }
   if (act === "dfilt") { docFilter = b.dataset.m; return render(); }
@@ -2079,7 +2085,7 @@ document.addEventListener("change", async (e) => {
 });
 document.addEventListener("submit", async (e) => {
   e.preventDefault();
-  if (e.target.id === "settingsForm") { const ok = await save("settings","main",{...S.settings, p1:$("#s-p1").value.trim(), p2:$("#s-p2").value.trim(), child:$("#s-child").value.trim(), inrPerGbp: num($("#s-inr").value)||""}); if (ok) toast("Settings saved"); }
+  if (e.target.id === "settingsForm") { const ok = await saveSettings({ p1:$("#s-p1").value.trim(), p2:$("#s-p2").value.trim(), child:$("#s-child").value.trim(), inrPerGbp: num($("#s-inr").value)||""}); if (ok) toast("Settings saved"); }
   if (e.target.id === "recForm") submitForm();
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && $("#scrim")) closeModal(); });
@@ -2692,7 +2698,7 @@ draw();
   for (const c of COLS) {
     db.collection(c).onSnapshot(snap => { S[c] = snap.docs.map(d => ({id:d.id, ...d.data()})); S.loaded[c] = true; render(); }, onErr);
   }
-  db.doc("settings/main").onSnapshot(snap => { S.settings = snap.exists ? {...snap.data()} : {}; render(); }, onErr);
+  db.doc("settings/main").onSnapshot(snap => { S.settings = snap.exists ? {...snap.data()} : {}; S.settingsExists = !!snap.exists; S.loaded.settings = true; render(); }, onErr);
   render();
 })();
 })();
