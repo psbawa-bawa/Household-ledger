@@ -844,7 +844,7 @@ function draw() {
   window.scrollTo(0, scrollY);
 }
 let connMsg = `<div class="empty">Loading your figures…</div>`;
-const datalists = () => `<datalist id="insurers">${["Admiral","Aviva","Direct Line","LV=","Churchill","AXA","Hastings Direct","esure","Saga","Zurich","Legal & General","Vitality","Bupa"].map(x=>`<option>${x}</option>`).join("")}</datalist><datalist id="breakdown">${["AA","RAC","Green Flag","Start Rescue"].map(x=>`<option>${x}</option>`).join("")}</datalist><datalist id="budgetGroups">${["Salaries","Home","HMO","Renaissance Court","Credit cards","Insurance","Subscriptions","Car","Children","Savings & investments","Other bills"].map(x=>`<option>${x}</option>`).join("")}</datalist><datalist id="ooCats">${["Repair","Holiday","School","Gift","Car repair","Furniture","Medical","Tax bill"].map(x=>`<option>${x}</option>`).join("")}</datalist><datalist id="roomsList"><option>Whole property</option>${Array.from({length:12},(_,i)=>`<option>Room ${i+1}</option>`).join("")}</datalist><datalist id="providers">${["Trading 212","AJ Bell","Hargreaves Lansdown","Vanguard","Zerodha","Groww","ICICI Direct","HDFC Securities","Nationwide","Monzo","Chase","NS&I"].map(x=>`<option>${x}</option>`).join("")}</datalist>`;
+const datalists = () => `<datalist id="insurers">${["Admiral","Aviva","Direct Line","LV=","Churchill","AXA","Hastings Direct","esure","Saga","Zurich","Legal & General","Vitality","Bupa"].map(x=>`<option>${x}</option>`).join("")}</datalist><datalist id="breakdown">${["AA","RAC","Green Flag","Start Rescue"].map(x=>`<option>${x}</option>`).join("")}</datalist><datalist id="budgetGroups">${["Salaries","Home","HMO","Renaissance Court","Credit cards","Loans & finance","Insurance","Subscriptions","Car","Children","Savings & investments","Other bills"].map(x=>`<option>${x}</option>`).join("")}</datalist><datalist id="ooCats">${["Repair","Holiday","School","Gift","Car repair","Furniture","Medical","Tax bill"].map(x=>`<option>${x}</option>`).join("")}</datalist><datalist id="roomsList"><option>Whole property</option>${Array.from({length:12},(_,i)=>`<option>Room ${i+1}</option>`).join("")}</datalist><datalist id="providers">${["Trading 212","AJ Bell","Hargreaves Lansdown","Vanguard","Zerodha","Groww","ICICI Direct","HDFC Securities","Nationwide","Monzo","Chase","NS&I"].map(x=>`<option>${x}</option>`).join("")}</datalist>`;
 const ro = () => canWrite ? "" : "disabled";
 const addBtn = (col, label, extra="") => canWrite ? `<button class="btn primary" data-act="new" data-col="${col}" ${extra}>+ ${label}</button>` : "";
 
@@ -2063,10 +2063,11 @@ document.addEventListener("submit", (e) => { if (e.target.id === "qForm") { e.pr
 const GROUP_RULES = [
   [/american express|\bamex\b|barclaycard|credit card|capital one|\bmbna\b|tesco bank|virgin money cc/, "Credit cards"],
   [/mortgage/, "Mortgage"],
-  [/council|\bctax\b/, "Home"],
+  [/council|\bctax\b|district\b|borough/, "Home"],
+  [/finance|\bfin\b|\bloan\b|klarna|clearpay|\bv12\b|paypal credit|novuna/, "Loans & finance"],
   [/british gas|octopus|\bedf\b|e\.?on\b|\bovo\b|scottish power|so energy|utility warehouse|electric|\bgas\b|energy/, "Home"],
   [/water|thames|severn|anglian|yorkshire water|affinity/, "Home"],
-  [/\bsky\b|virgin media|\bbt\b|talktalk|plusnet|vodafone|\bee\b|\bo2\b|three|giffgaff|tv licen|broadband|phone/, "Home"],
+  [/\bsky\b|virgin media|\bbt\b|talktalk|plusnet|vodafone|\bee\b|\bo2\b|three|giffgaff|tv licen|broadband|phone|seethelight|hyperoptic|community fibre|gigaclear|zen internet|id mobile|lebara|smarty|voxi/, "Home"],
   [/netflix|spotify|disney|prime video|amazon prime|apple\.com|icloud|google|youtube|audible|now tv|chatgpt|claude|subscription/, "Subscriptions"],
   [/insurance|aviva|admiral|direct line|\blv\b|churchill|axa|hastings|legal & general|legal and general|vitality|bupa|zurich|homecare|boiler cover/, "Insurance"],
   [/dvla|car tax|road tax|petrol|fuel|\bshell\b|\bbp\b|\besso\b|texaco|\brac\b|\baa\b|green flag|car finance|parking|mot\b/, "Car"],
@@ -2209,29 +2210,52 @@ function parseStatement(text, flip) {
   if (cardStyle) for (const t of tx) { const o = t.out; t.out = t.inn; t.inn = o; }
   return { tx, cardStyle };
 }
+const LENDERS = /\b(halifax|nationwide|santander|barclays mortgage|natwest|lloyds|tsb|coventry|skipton|yorkshire b|leeds b|kensington|precise|paragon|mortgage works|bm solutions|accord|virgin money|hsbc mortgage|first direct|metro bank|aldermore|together|foundation home|kent reliance|mortgage)\b/i;
+const txMethod = t => /^(\)\)\)|VIS|CPT?|POS|DEB)$/.test(t.type || "") ? "Card" : /^ATM$/.test(t.type || "") ? "Cash" : "Bank";
+function txName(t) {
+  const name = t.name || t.desc, ref = t.ref || "";
+  if (ref && /^(SO|BP|OBP|TFR|FPO|FPI|CR)$/.test(t.type || "") && !/^(?=.*\d)[A-Z0-9]{8,}$/i.test(ref.replace(/\s/g, ""))) return `${ref} · ${name}`;
+  return name;
+}
 function buildImportRows(tx) {
-  const groups = new Map();
-  for (const t of tx) { const k = (t.out ? "o:" : "i:") + merchantKey(t.desc); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(t); }
+  // 1. group by payee; 2. inside a group, keep separate payments that happen more than once in the same month apart
+  const base = new Map();
+  for (const t of tx) { const k = (t.out ? "o:" : "i:") + merchantKey((t.ref && /^(SO|BP|OBP)$/.test(t.type||"")) ? t.desc : (t.name || t.desc)); if (!base.has(k)) base.set(k, []); base.get(k).push(t); }
+  const groups = [];
+  for (const [k, list] of base) {
+    const perMonth = {}; list.forEach(t => { const m = t.date.slice(0,7); perMonth[m] = (perMonth[m] || 0) + 1; });
+    if (Math.max(...Object.values(perMonth)) <= 1) { groups.push([k, list]); continue; }
+    const byAmt = new Map(); for (const t of list) { const a = (t.out || t.inn).toFixed(2); if (!byAmt.has(a)) byAmt.set(a, []); byAmt.get(a).push(t); }
+    for (const [a, sub] of byAmt) {
+      const pm = {}; const idx = sub.map(t => { const m = t.date.slice(0,7); pm[m] = (pm[m] || 0) + 1; return pm[m] - 1; });
+      const n = Math.max(...Object.values(pm));
+      for (let j = 0; j < n; j++) groups.push([k + "|" + a + "|" + j, sub.filter((_, i) => idx[i] === j), n > 1 ? j + 1 : 0]);
+    }
+  }
   const existing = new Set(S.budget.map(b => merchantKey(b.label)));
   const rows = [];
-  for (const [k, list] of groups) {
+  for (const [k, list, nth] of groups) {
     const isOut = k.startsWith("o:");
     list.sort((a,b) => a.date < b.date ? -1 : 1);
+    const t0 = list[list.length - 1];
     const months = new Set(list.map(t => t.date.slice(0,7)));
-    const ddso = list.some(t => /^(DD|SO|D\/D|S\/O|STO|DDR)$/.test(t.type) || /\b(dd|direct debit|s\/o|standing order)\b/i.test(t.desc));
-    const recurring = months.size >= 2 || ddso;
-    const g = guessGroup(list[0].desc);
+    const ddso = list.some(t => /^(DD|SO|D\/D|S\/O|STO|DDR)$/.test(t.type) || /\b(direct debit|standing order)\b/i.test(t.desc));
+    const spanDays = (parseD(list[list.length-1].date) - parseD(list[0].date)) / 86400000;
+    const isCard = list.every(t => /^(\)\)\)|VIS|ATM|CPT?|POS|DEB)$/.test(t.type || ""));
+    const recurring = ddso || (months.size >= (isCard ? 3 : 2) && spanDays >= 25);
+    const g = guessGroup(t0.desc);
     const amounts = list.map(t => isOut ? t.out : t.inn);
-    const days = list.map(t => +t.date.slice(8,10)); const dayMode = days.sort((a,b)=>days.filter(x=>x===b).length-days.filter(x=>x===a).length)[0];
-    const name = titleCase(merchantKey(list[0].desc) || list[0].desc).slice(0, 40);
-    const already = existing.has(merchantKey(list[0].desc));
-    const isMortgage = g.group === "Mortgage";
-    const isRentIn = !isOut && S.tenancies.some(t => String(t.tenantName||"").toLowerCase().split(/\s+/).some(w => w.length >= 3 && list[0].desc.toLowerCase().includes(w)));
+    const days = list.map(t => +t.date.slice(8,10)); const dayMode = [...days].sort((a,b)=>days.filter(x=>x===b).length-days.filter(x=>x===a).length)[0];
+    const already = existing.has(merchantKey(t0.name || t0.desc));
+    const isMortgage = g.group === "Mortgage" || (isOut && LENDERS.test(t0.desc) && amounts[amounts.length-1] >= 300);
+    const isRentIn = !isOut && S.tenancies.some(t => String(t.tenantName||"").toLowerCase().split(/\s+/).some(w => w.length >= 3 && t0.desc.toLowerCase().includes(w)));
     if (recurring) {
       const last = amounts[amounts.length - 1]; const varies = Math.max(...amounts) > Math.min(...amounts) * 1.1;
-      rows.push({ section: isOut ? "rec" : "recin", include: isOut && !already && !isMortgage, name, desc: list[0].desc, type: isOut ? "bill" : "income", amount: Math.round(last*100)/100, day: dayMode, date: list[list.length-1].date, group: isMortgage ? "" : (g.group || (isOut ? "" : "Salaries")), propertyId: g.propertyId, count: list.length, months: months.size, varies, note: already ? "Already in your budget" : isMortgage ? "Mortgages are already counted from Properties" : isRentIn ? "Looks like rent, which comes from the Rent tab" : varies ? "Amount changes month to month" : "" });
+      const nm = titleCase(txName(t0)).slice(0, 40) + (nth ? ` (${nth})` : "");
+      rows.push({ section: isOut ? "rec" : "recin", include: isOut && !already && !isMortgage, name: nm, desc: t0.desc, ref: t0.ref || "", method: txMethod(t0), type: isOut ? "bill" : "income", amount: Math.round(last*100)/100, day: dayMode, date: t0.date, group: isMortgage ? "" : (g.group || (isOut ? "" : "Salaries")), propertyId: g.propertyId, count: list.length, months: months.size, varies,
+        note: already ? "Already in your budget" : isMortgage ? "Looks like a mortgage. These are already counted from Properties" : isRentIn ? "Looks like rent, which comes from the Rent tab" : varies ? "Amount changes month to month" : "" });
     } else {
-      for (const t of list) rows.push({ section: isOut ? "one" : "onein", include: false, name: titleCase(t.desc).slice(0, 40), desc: t.desc, type: isOut ? "oneoff" : "oneoffin", amount: isOut ? t.out : t.inn, day: +t.date.slice(8,10), date: t.date, group: g.group === "Mortgage" ? "" : g.group, propertyId: g.propertyId, count: 1, months: 1, note: "" });
+      for (const t of list) rows.push({ section: isOut ? "one" : "onein", include: false, name: titleCase(txName(t)).slice(0, 40), desc: t.desc, ref: t.ref || "", method: txMethod(t), type: isOut ? "oneoff" : "oneoffin", amount: isOut ? t.out : t.inn, day: +t.date.slice(8,10), date: t.date, group: g.group === "Mortgage" ? "" : g.group, propertyId: g.propertyId, count: 1, months: 1, note: isRentIn ? "Looks like rent, which comes from the Rent tab" : "" });
     }
   }
   const ord = { rec: 0, one: 1, recin: 2, onein: 3 };
@@ -2243,8 +2267,8 @@ function importOpen() {
   $("#modalRoot").innerHTML = `<div class="scrim" id="scrim"><div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="iTitle">
     <header><h2 id="iTitle">Import a bank statement</h2><button class="btn ghost" data-act="close" aria-label="Close">✕</button></header>
     <div style="padding:16px 18px;display:flex;flex-direction:column;gap:14px" id="impBody">
-      <p class="sub" style="margin:0;max-width:70ch">Download your statement as a <b>CSV</b> file from your bank's website or app (usually under Statements → Export or Download), then choose it here. Two or three months works best: payments that repeat are spotted as monthly bills. The file stays on this device; only the lines you choose are saved.</p>
-      <div class="row"><input type="file" id="impFile" accept=".csv,text/csv" class="input"></div>
+      <p class="sub" style="margin:0;max-width:70ch">Choose your statement: the <b>PDF</b> from your bank's app or website (HSBC statements are read exactly), or a <b>CSV</b> export. Two or three months works best: payments that repeat are spotted as monthly bills. The file stays on this device; only the lines you choose are saved.</p>
+      <div class="row"><input type="file" id="impFile" accept=".csv,.pdf,text/csv,application/pdf" class="input"></div>
       <div id="impOut"></div>
     </div></div></div>`;
 }
@@ -2261,7 +2285,7 @@ function importRender() {
       <div class="row" style="justify-content:space-between"><span class="sub">${sec[k][1]}</span><button type="button" class="btn ghost small" data-act="impall" data-sec="${k}" data-on="${allOn?0:1}">${allOn?"Untick all":"Tick all"}</button></div>
       <div class="tablewrap"><table class="imp"><thead><tr><th></th><th>Name</th><th>Add as</th><th>Group</th><th>Property</th><th class="n">Amount</th><th>${k.startsWith("rec")?"Day":"Date"}</th></tr></thead><tbody>
       ${list.map(([r,i]) => `<tr class="${r.include?"":"off"}"><td><input type="checkbox" data-ir="${i}" data-if="include" ${r.include?"checked":""} aria-label="Include ${esc(r.name)}"></td>
-        <td><input data-ir="${i}" data-if="name" value="${esc(r.name)}" style="width:170px" aria-label="Name"><div class="sub" title="${esc(r.desc)}">${esc(r.desc.slice(0,38))}${r.count>1?` · ${r.count} payments`:""}</div>${r.note?`<div class="sub" style="color:var(--warn)">${esc(r.note)}</div>`:""}</td>
+        <td><input data-ir="${i}" data-if="name" value="${esc(r.name)}" style="width:170px" aria-label="Name"><div class="sub" title="${esc(r.desc)}">${esc(r.desc.slice(0,38))}${r.count>1?` · ${r.count} payments`:""}${r.section.startsWith("one")&&r.method&&r.method!=="Bank"?` · ${r.method}`:""}</div>${r.note?`<div class="sub" style="color:var(--warn)">${esc(r.note)}</div>`:""}</td>
         <td><select data-ir="${i}" data-if="type" aria-label="Add as">${typeOpts(r)}</select></td>
         <td><input data-ir="${i}" data-if="group" list="budgetGroups" value="${esc(r.group)}" style="width:130px" aria-label="Group"></td>
         <td><select data-ir="${i}" data-if="propertyId" aria-label="Property">${propOpts(r)}</select></td>
@@ -2271,12 +2295,123 @@ function importRender() {
   }).join("");
   const bills = selected.filter(r => r.type === "bill").reduce((a,r)=>a+num(r.amount),0);
   const ones = selected.filter(r => r.type === "oneoff").reduce((a,r)=>a+num(r.amount),0);
-  $("#impOut").innerHTML = `<div class="banner">${IMP.tx.length} transactions from ${fmtD(IMP.from)} to ${fmtD(IMP.to)}. ${IMP.cardStyle ? "Read as a credit card statement (spending shown as positive)." : ""} <button type="button" class="btn ghost small" data-act="impflip">${IMP.cardStyle ? "It's a bank account" : "It's a credit card statement"}</button></div>
+  $("#impOut").innerHTML = `<div class="banner">${IMP.tx.length} transactions from ${fmtD(IMP.from)} to ${fmtD(IMP.to)}. ${IMP.pdf ? (IMP.check === true ? `<b>✓ Totals match the statement</b> (paid out ${gbp(IMP.sumOut,1)}, paid in ${gbp(IMP.sumIn,1)}).` : IMP.check === false ? `<b>Check these:</b> read ${gbp(IMP.sumOut,1)} out and ${gbp(IMP.sumIn,1)} in, but the statement says ${gbp(IMP.summary.out,1)} and ${gbp(IMP.summary.inn,1)}.` : `Paid out ${gbp(IMP.sumOut,1)}, paid in ${gbp(IMP.sumIn,1)}.`) : `${IMP.cardStyle ? "Read as a credit card statement (spending shown as positive)." : ""} <button type="button" class="btn ghost small" data-act="impflip">${IMP.cardStyle ? "It's a bank account" : "It's a credit card statement"}</button>`}</div>
     ${html}${datalists()}
     <div class="row" style="justify-content:space-between;position:sticky;bottom:0;background:var(--surface);padding-block:10px;border-top:1px solid var(--line)">
       <span class="sub"><b>${selected.length}</b> selected · monthly bills ${gbp(bills)} · one-offs ${gbp(ones)}</span>
       <div class="row"><button type="button" class="btn" data-act="close">Cancel</button><button type="button" class="btn primary" data-act="impsave" ${selected.length?"":"disabled"}>Add ${selected.length} to budget</button></div>
     </div>`;
+}
+// ---------- PDF statements ----------
+// Reads a bank statement PDF (column layout: date · type · details · paid out · paid in · balance).
+async function parsePdfStatementDoc(doc) {
+  const MON = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+  const norm = s => String(s).toLowerCase().replace(/[\s£]/g, "");
+  const amtRe = /^-?£?\d{1,3}(?:,\d{3})*\.\d{2}(?:\s?(?:cr|dr|d|c))?$/i;
+  const toNum = s => parseFloat(String(s).replace(/[£,\s]|cr|dr/gi, ""));
+  let fallbackYear = null, summary = {};
+  const tx = [];
+  let lastDate = null;
+  const pad = n => String(n).padStart(2, "0");
+  const dateFrom = (str) => {
+    let m = str.match(/^(\d{1,2})\s?([A-Za-z]{3})[a-z]*\.?\s?(\d{2,4})?$/);
+    if (m && MON[m[2].toLowerCase()] !== undefined) { let y = m[3] ? +m[3] : (fallbackYear || new Date().getFullYear()); if (y < 100) y += 2000; return `${y}-${pad(MON[m[2].toLowerCase()]+1)}-${pad(+m[1])}`; }
+    m = str.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/);
+    if (m) { let y = +m[3]; if (y < 100) y += 2000; return `${y}-${pad(+m[2])}-${pad(+m[1])}`; }
+    return null;
+  };
+  for (let pn = 1; pn <= doc.numPages; pn++) {
+    const page = await doc.getPage(pn);
+    const tc = await page.getTextContent();
+    const items = tc.items.filter(i => i.str && i.str.trim()).map(i => ({ s: i.str.trim(), x: i.transform[4], y: i.transform[5], r: i.transform[4] + i.width }));
+    const all = items.map(i => i.s).join(" ");
+    const ym = all.match(/\b(20\d{2})\b/); if (ym && !fallbackYear) fallbackYear = +ym[1];
+    // statement summary totals (for a cross-check), e.g. "Payments In £14,582.43"
+    const lines0 = groupLines(items);
+    for (const L of lines0) {
+      const label = norm(L.filter(i => !amtRe.test(i.s.replace(/^£/, ""))).map(i => i.s).join(""));
+      const amt = L.find(i => /\d\.\d{2}$/.test(i.s));
+      if (!amt) continue;
+      if (/^(total)?(payments|moneyin|paidin|deposits)in$|^paymentsin$|^moneyin$|^totalpaidin$|^totalmoneyin$|^totalcredits?$/.test(label) && summary.inn === undefined) summary.inn = toNum(amt.s);
+      if (/^(payments|money|paid)out$|^totalpaidout$|^totalmoneyout$|^totaldebits?$|^paymentsout$/.test(label) && summary.out === undefined) summary.out = toNum(amt.s);
+    }
+    // header row with the amount columns
+    let hdr = null;
+    for (const L of lines0) {
+      const n = L.map(i => ({ ...i, n: norm(i.s) }));
+      const out = n.find(i => /(paid|money)out|withdrawn|debits?$|paymentsout/.test(i.n));
+      const inn = n.find(i => /(paid|money)in$|paidin|moneyin|deposits?|credits?$|paymentsin/.test(i.n) && i !== out);
+      if (out && inn && n.some(i => /date/.test(i.n))) { const bal = n.find(i => /balance/.test(i.n)); hdr = { y: L[0].y, out: out.r, inn: inn.r, bal: bal ? bal.r : null, dateX: n.find(i => /date/.test(i.n)).x }; break; }
+    }
+    if (!hdr) continue;
+    const body = lines0.filter(L => L[0].y < hdr.y - 2);
+    const cols = [["out", hdr.out], ["inn", hdr.inn]].concat(hdr.bal ? [["bal", hdr.bal]] : []);
+    const leftOfAmounts = Math.min(hdr.out, hdr.inn) - 70;
+    let cur = null;
+    for (const L of body) {
+      const text = L.map(i => i.s).join(" ");
+      if (/balance (brought|carried) forward|^balance$|closing balance|opening balance/i.test(text)) { const d = L.find(i => dateFrom(i.s)); if (d) lastDate = dateFrom(d.s); continue; }
+      const dItem = L.find(i => i.x < hdr.dateX + 40 && dateFrom(i.s));
+      if (dItem) lastDate = dateFrom(dItem.s);
+      const amounts = L.filter(i => amtRe.test(i.s) && i.x > leftOfAmounts - 40);
+      const words = L.filter(i => i !== dItem && !amounts.includes(i) && i.x < leftOfAmounts + 40);
+      const typeItem = words.find(i => /^([A-Z]{1,4}|\)\)\))$/.test(i.s) && words.indexOf(i) === 0 && words.length > 1);
+      if (typeItem) { cur = { type: typeItem.s, lines: [] }; }
+      const detail = words.filter(i => i !== typeItem).map(i => i.s).join(" ").trim();
+      if (detail) { if (!cur) cur = { type: "", lines: [] }; cur.lines.push(detail); }
+      let out = 0, inn = 0;
+      for (const a of amounts) {
+        let best = null, bd = 1e9; for (const [k, x] of cols) { const d = Math.abs(a.r - x); if (d < bd) { bd = d; best = k; } }
+        if (bd > 45) continue;
+        if (best === "out") out += toNum(a.s); else if (best === "inn") inn += toNum(a.s);
+      }
+      if ((out || inn) && lastDate) {
+        let lines = cur ? cur.lines : [];
+        if (lines.length > 1 && /^INT'?L\s*\d+/i.test(lines[0])) lines = lines.slice(1);
+        tx.push({ date: lastDate, desc: lines.join(" ").replace(/\s+/g, " ").trim() || "Payment", name: lines[0] || "", ref: lines.slice(1).join(" "), out, inn, type: cur ? cur.type : "" });
+        cur = null;
+      }
+    }
+  }
+  function groupLines(items) {
+    const sorted = [...items].sort((a, b) => b.y - a.y || a.x - b.x);
+    const lines = [];
+    for (const it of sorted) { const L = lines[lines.length - 1]; if (L && Math.abs(L[0].y - it.y) <= 2.5) L.push(it); else lines.push([it]); }
+    lines.forEach(L => L.sort((a, b) => a.x - b.x));
+    return lines;
+  }
+  const sumOut = Math.round(tx.reduce((a, t) => a + t.out, 0) * 100) / 100;
+  const sumIn = Math.round(tx.reduce((a, t) => a + t.inn, 0) * 100) / 100;
+  return { tx, summary, sumOut, sumIn, checked: summary.out !== undefined && summary.inn !== undefined ? (Math.abs(summary.out - sumOut) < 0.01 && Math.abs(summary.inn - sumIn) < 0.01) : null };
+}
+
+let pdfLib = null;
+function loadPdfJs() {
+  if (pdfLib) return pdfLib;
+  pdfLib = new Promise((res, rej) => {
+    if (window.pdfjsLib) return res(window.pdfjsLib);
+    const sc = document.createElement("script");
+    sc.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    sc.onload = () => { try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; res(window.pdfjsLib); } catch (e) { rej(e); } };
+    sc.onerror = () => { pdfLib = null; rej(new Error("Couldn't load the PDF reader. Check your internet connection.")); };
+    document.head.appendChild(sc);
+  });
+  return pdfLib;
+}
+async function importLoadPdf(file) {
+  $("#impOut").innerHTML = `<div class="banner">Reading ${esc(file.name)}…</div>`;
+  try {
+    const lib = await loadPdfJs();
+    const doc = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+    const r = await parsePdfStatementDoc(doc);
+    if (!r.tx.length) throw new Error("No transactions found. This PDF layout isn't recognised yet; try the CSV download, or send the PDF to Claude to add support for it");
+    const dates = r.tx.map(t => t.date).sort();
+    IMP = { file, tx: r.tx, pdf: true, cardStyle: false, check: r.checked, summary: r.summary, sumOut: r.sumOut, sumIn: r.sumIn, from: dates[0], to: dates[dates.length-1], rows: buildImportRows(r.tx) };
+    importRender();
+  } catch (err) {
+    console.error(err);
+    $("#impOut").innerHTML = `<div class="banner bad">Couldn't read that PDF: ${esc(err.message || "unknown problem")}.</div>`;
+  }
 }
 async function importLoad(file, flip) {
   try {
@@ -2303,14 +2438,14 @@ async function importSave() {
   for (const r of sel.filter(r => r.type === "oneoff" || r.type === "oneoffin")) (byMonth[r.date.slice(0,7)] = byMonth[r.date.slice(0,7)] || []).push(r);
   for (const [mk, list] of Object.entries(byMonth)) {
     const cur = (S.months.find(m => m.id === mk) || {}).oneoffs || [];
-    const add = list.map((r, j) => ({ id: Date.now().toString(36) + j, label: r.name.trim() || "Payment", amount: num(r.amount), kind: r.type === "oneoffin" ? "in" : "out", date: r.date, cat: ooCatFrom(r.group, r.desc), propertyId: r.propertyId || "", method: IMP.cardStyle ? "Card" : "Bank", reason: "" }));
+    const add = list.map((r, j) => ({ id: Date.now().toString(36) + j, label: r.name.trim() || "Payment", amount: num(r.amount), kind: r.type === "oneoffin" ? "in" : "out", date: r.date, cat: ooCatFrom(r.group, r.desc), propertyId: r.propertyId || "", method: IMP.cardStyle ? "Card" : (r.method || "Bank"), reason: r.ref || "" }));
     if (await saveMonth(mk, { oneoffs: [...cur, ...add] })) n += list.length;
   }
   closeModal(); toast(`Added ${n} item${n===1?"":"s"} to your budget`);
 }
 document.addEventListener("change", async (e) => {
   const el = e.target;
-  if (el.id === "impFile" && el.files && el.files[0]) return importLoad(el.files[0]);
+  if (el.id === "impFile" && el.files && el.files[0]) { const f = el.files[0]; return /\.pdf$/i.test(f.name) || f.type === "application/pdf" ? importLoadPdf(f) : importLoad(f); }
   if (el.dataset && el.dataset.ir !== undefined && IMP) {
     const r = IMP.rows[+el.dataset.ir]; const f = el.dataset.if;
     r[f] = el.type === "checkbox" ? el.checked : el.value;
