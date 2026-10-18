@@ -1158,11 +1158,12 @@ function budgetFor(mk) {
   const fixed = out.reduce((a,l)=>a+amt(l),0);
   const mortT = [...morts,...loans].reduce((a,x)=>a+x.amount,0);
   const disposable = income - fixed - mortT;
-  const oneOut = oneoffs.filter(o=>o.kind!=="in").reduce((a,o)=>a+num(o.amount),0);
+  const oneOut = oneoffs.filter(o=>o.kind!=="in" && !isCo(o)).reduce((a,o)=>a+num(o.amount),0);
+  const coOut = oneoffs.filter(o=>o.kind!=="in" && isCo(o)).reduce((a,o)=>a+num(o.amount),0);
   const oneIn = oneoffs.filter(o=>o.kind==="in").reduce((a,o)=>a+num(o.amount),0);
   const left = disposable - oneOut + oneIn;
   const any = income || fixed || mortT || oneoffs.length;
-  return { md, ov, amt, inc, out, rentRows, morts, loans, oneoffs, salaries, rent, income, fixed, mortT, disposable, oneOut, oneIn, left, any, useExpected, future };
+  return { md, ov, amt, inc, out, rentRows, morts, loans, oneoffs, salaries, rent, income, fixed, mortT, disposable, oneOut, coOut, oneIn, left, any, useExpected, future };
 }
 // ---------- budget groups & categories (saved in Settings so new ones stay) ----------
 const BG_DEFAULT = ["Bawa Residence", "Nene Gardens", "Renaissance Court"];
@@ -1257,6 +1258,8 @@ document.addEventListener("change", (e) => {
     sel.innerHTML = `<option value="">Choose…</option>` + cats.map(x => `<option ${x === cur ? "selected" : ""}>${esc(x)}</option>`).join("") + `<option value="__new">+ New category…</option>`;
     const n = $("#" + pfx + "-bcnew"); if (n) n.hidden = true;
   }
+  if (el.dataset && el.dataset.paysel) { const w = $("#" + el.dataset.paysel + "-cowrap"); if (w) w.hidden = el.value !== "company"; }
+  if (el.dataset && el.dataset.coreason) { const n = $("#" + el.dataset.coreason + "-conew"); if (n) { n.hidden = el.value !== "__new"; if (!n.hidden) n.focus(); } }
   if (el.dataset && el.dataset.bcsel) { const n = $("#" + el.dataset.bcsel + "-bcnew"); if (n) { n.hidden = el.value !== "__new"; if (!n.hidden) n.focus(); } }
 });
 function catsManageOpen() {
@@ -1267,39 +1270,57 @@ function catsManageOpen() {
       ${bGroups().map((g, gi) => `<div class="card" style="gap:10px"><h3>${esc(g)}</h3>
         <div class="row">${bCats(g).map(c => `<span class="chip catchip">${esc(c)}${canWrite ? ` <button class="x" data-act="catdel" data-g="${esc(g)}" data-c="${esc(c)}" aria-label="Remove ${esc(c)}">×</button>` : ""}</span>`).join("")}</div>
         ${canWrite ? `<div class="row"><input class="input" id="catnew-${gi}" placeholder="New category for ${esc(g)}" style="flex:1;min-width:0"><button class="btn small primary" data-act="catadd" data-g="${esc(g)}" data-i="${gi}">Add</button></div>` : ""}</div>`).join("")}
+      <div class="card" style="gap:10px;background:var(--t5);border-color:transparent"><h3>Paid by ${esc(coName())}: reasons</h3>
+        <p class="sub" style="margin:0">Reasons you can pick when an expense is paid from the company account.</p>
+        <div class="row">${coReasons().map(c => `<span class="chip catchip">${esc(c)}${canWrite ? ` <button class="x" data-act="codel" data-c="${esc(c)}" aria-label="Remove ${esc(c)}">×</button>` : ""}</span>`).join("")}</div>
+        ${canWrite ? `<div class="row"><input class="input" id="conew-r" placeholder="New reason" style="flex:1;min-width:0"><button class="btn small primary" data-act="coadd">Add</button></div>
+        <div class="row"><label for="coname" class="sub">Company name</label><input class="input" id="coname" value="${esc(coName())}" style="flex:1;min-width:0"><button class="btn small" data-act="coname">Save name</button></div>` : ""}</div>
     </div></div></div>`;
 }
 function budgetGroupBlocks(B) {
   // per-group totals this month: regular bills + mortgages + one-offs out, with the items behind each category
   const groups = bGroups(); const per = {};
-  const P0 = () => ({ bills: 0, mort: 0, one: 0, cats: {}, items: {} });
+  const P0 = () => ({ bills: 0, mort: 0, one: 0, co: 0, cats: {}, items: {} });
   groups.forEach(g => per[g] = P0());
   const put = (g, kind, cat, label, v, note) => { const P = per[g] || (per[g] = P0()); P[kind] += v; const c = cat || "Uncategorised"; P.cats[c] = (P.cats[c] || 0) + v; (P.items[c] = P.items[c] || []).push({ label, v, note }); };
   for (const l of B.out) { const k = classify(l, true); put(k.g, "bills", k.c, l.label, B.amt(l), "regular"); }
   for (const m of B.morts) put(groupOfProperty(m.id) || homeGroup(), "mort", "Mortgage", m.label, m.amount, m.sub);
   for (const d of B.loans) put(homeGroup(), "bills", "Loans & finances", d.label, d.amount, d.sub);
-  for (const o of B.oneoffs.filter(o => o.kind !== "in")) { const k = classify(o, false); put(k.g, "one", k.c, o.label || "One-off", num(o.amount), `one-off${o.date ? " · " + fmtD(o.date) : ""}`); }
+  for (const o of B.oneoffs.filter(o => o.kind !== "in")) { const k = classify(o, false); put(k.g, isCo(o) ? "co" : "one", k.c || (isCo(o) ? `Paid by ${coName()}` : ""), o.label || "One-off", num(o.amount), `${isCo(o) ? `paid by ${coName()}` : "one-off"}${o.date ? " · " + fmtD(o.date) : ""}`); }
   const cols = ["var(--t1k)", "var(--t2k)", "var(--t3k)", "var(--t4k)", "var(--t5k)", "var(--t6k)"];
   const tints = ["var(--t1)", "var(--t2)", "var(--t3)", "var(--t4)", "var(--t5)", "var(--t6)"];
   const catRow = (P, c, v, i) => `<details class="gcat"><summary><span><i class="gdot" style="background:${cols[i % 6]}"></i>${esc(c)} <span class="muted">(${P.items[c].length})</span></span><span class="num">${gbp(v)}</span></summary>
       <div class="gitems">${P.items[c].sort((a, b) => b.v - a.v).map(it => `<div><span>${esc(it.label)}${it.note ? ` <span class="muted">${esc(it.note)}</span>` : ""}</span><span class="num">${gbp(it.v)}</span></div>`).join("")}</div></details>`;
   return `<div class="grid g-cards" style="grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));align-items:start">${Object.keys(per).map((g, gi) => {
-    const P = per[g]; const tot = P.bills + P.mort + P.one; const list = Object.entries(P.cats).sort((a, b) => b[1] - a[1]);
+    const P = per[g]; const tot = P.bills + P.mort + P.one + P.co; const list = Object.entries(P.cats).sort((a, b) => b[1] - a[1]);
     const rows = list.map(([c, v], i) => catRow(P, c, v, i));
     return `<div class="card" style="gap:8px;background:${tints[gi % 6]};border-color:transparent"><div class="sechead"><h3 style="color:${cols[gi % 6]}">${esc(g)}</h3><b class="num">${gbp(tot)}</b></div>
-      <div class="sub">Bills ${gbp(P.bills)}${P.mort ? ` · mortgage ${gbp(P.mort)}` : ""} · one-offs ${gbp(P.one)}</div>
+      <div class="sub">Bills ${gbp(P.bills)}${P.mort ? ` · mortgage ${gbp(P.mort)}` : ""} · one-offs ${gbp(P.one)}${P.co ? ` · <b>paid by ${esc(coName())} ${gbp(P.co)}</b>` : ""}</div>
       ${tot ? `<div class="bar" style="height:10px;background:var(--surface)">${list.map(([c, v], i) => `<i style="width:${(v / tot * 100).toFixed(2)}%;background:${cols[i % 6]}" title="${esc(c)}: ${gbp(v)}"></i>`).join("")}</div>
       <div class="glist">${rows.slice(0, 6).join("")}${rows.length > 6 ? `<details class="gmore"><summary>Show all ${rows.length} categories</summary>${rows.slice(6).join("")}</details>` : ""}</div>
       <div class="sub" style="font-size:12px">Tap a category to see what's in it.</div>` : `<div class="sub">Nothing recorded yet this month.</div>`}
+      ${canWrite ? `<div class="row" style="gap:6px"><button class="btn small" data-act="ooaddg" data-g="${esc(g)}">+ Add expense</button><button class="btn small" data-act="ooaddg" data-g="${esc(g)}" data-co="1">+ Paid by ${esc(coName())}</button></div>` : ""}
     </div>`; }).join("")}</div>`;
 }
 
 const OO_CATS = ["Repairs & maintenance","Furnishing & appliances","Cleaning & gardening","Utilities","Insurance","Council tax & licences","Letting agent & legal fees","Accountant & professional fees","Car & transport","Groceries","Household","Eating out","Holidays & travel","Children & school","Medical & health","Gifts & occasions","Clothing","Shopping","Tax payment","Charity","Refund","Bonus","Other"];
+// ---------- company-paid expenses (personal spending paid from the Caremark account) ----------
+const coName = () => (S.settings.companyName || "Caremark").trim() || "Caremark";
+const CO_REASONS = ["Rental property project", "Repairs & maintenance", "Personal purchase", "Car insurance", "Car costs (fuel, service, tax)", "Household bills", "Travel & holidays", "Children & school", "Gifts", "Other"];
+const coReasons = () => (S.settings.coReasons && S.settings.coReasons.length) ? S.settings.coReasons : CO_REASONS;
+const isCo = o => o && o.payer === "company";
+function coFields(pfx, o) {
+  const list = o.coReason && !coReasons().includes(o.coReason) ? [o.coReason, ...coReasons()] : coReasons();
+  return `<div class="field"><label for="${pfx}-payer">Paid from</label><select id="${pfx}-payer" data-paysel="${pfx}"><option value="">Our own money</option><option value="company" ${isCo(o) ? "selected" : ""}>${esc(coName())} account</option></select></div>
+    <div class="field" id="${pfx}-cowrap" ${isCo(o) ? "" : "hidden"}><label for="${pfx}-coreason">Reason (${esc(coName())})</label><select id="${pfx}-coreason" data-coreason="${pfx}"><option value="">Choose…</option>${list.map(x => `<option ${x === o.coReason ? "selected" : ""}>${esc(x)}</option>`).join("")}<option value="__new">+ New reason…</option></select>
+      <input id="${pfx}-conew" class="input" placeholder="New reason" hidden style="margin-top:6px"></div>`;
+}
 function ooForm(pfx, o, actions) {
   return `<div class="card oo-form" id="${pfx}-form">
     <div class="fgroup">
       <div class="field"><label for="${pfx}-label">What was it</label><input id="${pfx}-label" value="${esc(o.label||"")}" placeholder="e.g. Boiler repair"></div>
       ${(() => { const k = o.label || o.bgroup || o.cat || o.propertyId ? classify(o, false) : { g: homeGroup(), c: "" }; return groupCatFields(pfx, k.g, k.c); })()}
+      ${coFields(pfx, o)}
       <div class="field"><label for="${pfx}-date">Date paid</label><input type="date" id="${pfx}-date" value="${o.date||todayISO()}"></div>
       <div class="field"><label for="${pfx}-method">Paid by</label><select id="${pfx}-method">${["Bank","Cash","Card"].map(m=>`<option ${m===(o.method||"Bank")?"selected":""}>${m}</option>`).join("")}</select></div>
       <div class="field"><label for="${pfx}-kind">Money in or out</label><select id="${pfx}-kind"><option value="out" ${o.kind!=="in"?"selected":""}>Money out</option><option value="in" ${o.kind==="in"?"selected":""}>Money in</option></select></div>
@@ -1318,10 +1339,16 @@ function ooCatFrom(group, text) {
 async function ooRead(pfx) {
   const v = id => ($("#"+pfx+"-"+id) || {}).value || "";
   const k = await readGroupCat(pfx);
-  return { label: v("label").trim(), bgroup: k.g, bcat: k.c, cat: k.c, propertyId: propertyOfGroup(k.g), date: v("date") || todayISO(), method: v("method"), kind: v("kind"), amount: num(v("amt")), reason: v("reason").trim() };
+  const payer = v("payer") === "company" ? "company" : "";
+  let coReason = payer ? v("coreason") : "";
+  if (coReason === "__new") {
+    coReason = v("conew").trim();
+    if (coReason && !coReasons().some(x => x.toLowerCase() === coReason.toLowerCase())) await saveSettings({ coReasons: [...coReasons(), coReason] });
+  }
+  return { label: v("label").trim(), bgroup: k.g, bcat: k.c, cat: k.c, propertyId: propertyOfGroup(k.g), date: v("date") || todayISO(), method: v("method"), kind: payer ? "out" : v("kind"), amount: num(v("amt")), reason: v("reason").trim(), payer, coReason };
 }
 function ooCatSummary(oo) {
-  const out = oo.filter(o => o.kind !== "in"); if (!out.length) return "";
+  const out = oo.filter(o => o.kind !== "in" && !isCo(o)); if (!out.length) return "";
   const by = {}; for (const o of out) { const k = classify(o, false); const key = `${k.g} · ${k.c || "Uncategorised"}`; by[key] = (by[key] || 0) + num(o.amount); }
   const tot = out.reduce((a,o)=>a+num(o.amount),0);
   const cash = out.filter(o=>o.method==="Cash").reduce((a,o)=>a+num(o.amount),0);
@@ -1339,6 +1366,13 @@ async function ooPut(item, oldMonth) {
   }
   const cur = ((S.months.find(m=>m.id===newMonth)||{}).oneoffs || []).filter(o => o.id !== item.id);
   return saveMonth(newMonth, { oneoffs: [...cur, item] });
+}
+function ooAddOpen(g, co) {
+  const mk = budgetMonth, nowK = monthKey(new Date());
+  $("#modalRoot").innerHTML = `<div class="scrim" id="scrim"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="ooT">
+    <header><h2 id="ooT">${co ? `Paid by ${esc(coName())}` : "Add expense"} · ${esc(g)}</h2><button class="btn ghost" data-act="close" aria-label="Close">✕</button></header>
+    <div style="padding:16px 18px">${ooForm("ooM", { bgroup: g, kind: "out", method: "Bank", payer: co ? "company" : "", date: mk === nowK ? todayISO() : mk + "-01" }, `<button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="oomsave">Save</button>`)}</div></div></div>`;
+  setTimeout(() => $("#ooM-label") && $("#ooM-label").focus(), 40);
 }
 function ooEditOpen(oid) {
   const o = ((S.months.find(m=>m.id===budgetMonth)||{}).oneoffs || []).find(x => x.id === oid); if (!o) return;
@@ -1380,7 +1414,7 @@ VIEWS.budget = () => {
       <div class="stat"><span class="k">Regular bills</span><span class="v">${gbp(B.fixed)}</span><span class="h">${B.out.length} direct debits and bills</span></div>
       <div class="stat"><span class="k">Mortgages &amp; loans</span><span class="v">${gbp(B.mortT)}</span></div>
       <div class="stat"><span class="k">Disposable income</span><span class="v ${B.disposable<0?"neg":"pos"}">${gbp(B.disposable)}</span><span class="h">Before one-offs</span></div>
-      <div class="stat"><span class="k">One-off spends</span><span class="v">${gbp(B.oneOut)}</span><span class="h">${B.oneIn?`Plus ${gbp(B.oneIn)} extra in`:`${B.oneoffs.length} this month`}</span></div>
+      <div class="stat"><span class="k">One-off spends</span><span class="v">${gbp(B.oneOut)}</span><span class="h">${B.coOut?`Plus ${gbp(B.coOut)} paid by ${esc(coName())}`:B.oneIn?`Plus ${gbp(B.oneIn)} extra in`:`${B.oneoffs.length} this month`}</span></div>
       <div class="stat"><span class="k">Left at month end</span><span class="v ${B.left<0?"neg":""}">${gbp(B.left)}</span></div>
     </div>
     ${B.income?`<div class="card" style="gap:8px"><div class="bar" style="height:20px" role="img" aria-label="Where the money goes">${flow.filter(f=>f[1]>0).map(f=>`<i style="width:${(f[1]/flowTot*100).toFixed(2)}%;background:${f[2]}" title="${f[0]}: ${gbp(f[1])}"></i>`).join("")}</div>
@@ -1406,10 +1440,10 @@ VIEWS.budget = () => {
       ${oo.map(o=>`<tr><td class="num" style="white-space:nowrap">${fmtD(o.date)}</td>
         <td><b>${esc(o.label)}</b>${o.reason?`<div class="sub">${esc(o.reason)}</div>`:""}</td>
         ${(() => { const k = classify(o, false); return `<td>${esc(k.g)}</td><td>${k.c ? `<span class="chip">${esc(k.c)}</span>` : '<span class="chip warn">Choose</span>'}</td>`; })()}
-        <td>${o.method?`<span class="chip ${o.method==="Cash"?"warn":"info"}">${esc(o.method)}</span>`:'<span class="muted">—</span>'}</td>
+        <td>${isCo(o)?`<span class="chip" style="background:var(--t5);color:var(--t5k)">${esc(coName())}</span>${o.coReason?`<div class="sub">${esc(o.coReason)}</div>`:""}`:o.method?`<span class="chip ${o.method==="Cash"?"warn":"info"}">${esc(o.method)}</span>`:'<span class="muted">—</span>'}</td>
         <td class="n num ${o.kind==="in"?"pos":""}">${o.kind==="in"?"+":""}${gbp(o.amount,1)}</td>
         <td style="white-space:nowrap">${canWrite?`<button class="btn ghost small" data-act="ooedit" data-oid="${esc(o.id)}">Edit</button><button class="btn ghost small danger" data-act="oodel" data-oid="${esc(o.id)}">Remove</button>`:""}</td></tr>`).join("")}
-    </tbody><tfoot><tr><td colspan="5">Net one-offs</td><td class="n">${gbp(B.oneIn-B.oneOut,1)}</td><td></td></tr></tfoot></table></div>` : `<p class="sub">No one-offs recorded for ${monthLabel(mk)}.</p>`}
+    </tbody><tfoot><tr><td colspan="5">Net one-offs from your own money${B.coOut?`<div class="sub">${gbp(B.coOut,1)} paid by ${esc(coName())} isn't taken off what's left this month</div>`:""}</td><td class="n">${gbp(B.oneIn-B.oneOut,1)}</td><td></td></tr></tfoot></table></div>` : `<p class="sub">No one-offs recorded for ${monthLabel(mk)}.</p>`}
     <div class="field"><label for="monthNotes">Notes for ${monthLabel(mk)}</label><textarea class="input" id="monthNotes" rows="2" ${ro()} placeholder="Anything to remember about this month">${esc(B.md.notes||"")}</textarea></div>
   </section>`;
 };
@@ -1581,8 +1615,46 @@ VIEWS.reports = () => {
       <div class="tablewrap" style="margin-top:10px"><table><thead><tr><th>Month</th><th class="n">Due</th><th class="n">Bank</th><th class="n">Cash</th><th class="n">Total collected</th></tr></thead><tbody>
       ${R.months.map(mk=>{ const m=g.monthly[mk]||{expected:0,bank:0,cash:0}; return `<tr><td>${monthLabel(mk)}</td>${cell(m.expected)}${cell(m.bank)}${cell(m.cash)}${cell(m.bank+m.cash)}</tr>`; }).join("")}
       </tbody></table></div></details>
-  </section>`).join("") : `<section class="block"><div class="empty">No rent recorded for ${reportLabel()}. Rent you mark on the Rent tab appears here.</div></section>`}`;
+  </section>`).join("") : `<section class="block"><div class="empty">No rent recorded for ${reportLabel()}. Rent you mark on the Rent tab appears here.</div></section>`}
+  ${coReportBlock()}`;
 };
+// personal spending paid from the company account, for the report year
+function coItems(months) {
+  const set = new Set(months);
+  return S.months.filter(m => set.has(m.id)).flatMap(m => (m.oneoffs || []).filter(o => isCo(o) && o.kind !== "in").map(o => ({ ...o, mk: m.id, g: classify(o, false).g, r: o.coReason || "Other" })))
+    .sort((a, b) => (a.date || "") < (b.date || "") ? -1 : 1);
+}
+function coReportBlock() {
+  const items = coItems(reportMonths()); const tot = items.reduce((a, o) => a + num(o.amount), 0);
+  const groups = [...new Set([...bGroups(), ...items.map(o => o.g)])].filter(g => items.some(o => o.g === g));
+  const reasons = [...new Set(items.map(o => o.r))].sort((a, b) => items.filter(o => o.r === b).reduce((s, o) => s + num(o.amount), 0) - items.filter(o => o.r === a).reduce((s, o) => s + num(o.amount), 0));
+  const sum = f => items.filter(f).reduce((a, o) => a + num(o.amount), 0);
+  const cell = v => `<td class="n">${v ? gbp(v, 1) : '<span class="muted">—</span>'}</td>`;
+  return `<section class="block">
+    <div class="sechead"><div><h2>Paid by ${esc(coName())} for us personally</h2><p class="sub">${reportLabel()}. Expenses marked “Paid from ${esc(coName())} account” on the Monthly budget. Share this with your accountant: these usually go through the director's loan account.</p></div>
+      ${items.length ? `<button class="btn" data-act="cocsv">Download spreadsheet (.csv)</button>` : ""}</div>
+    ${items.length ? `<div class="grid g-stats"><div class="stat"><span class="k">Total paid by ${esc(coName())}</span><span class="v">${gbp(tot, 1)}</span><span class="h">${items.length} payment${items.length > 1 ? "s" : ""}</span></div>
+      ${groups.map(g => `<div class="stat"><span class="k">${esc(g)}</span><span class="v">${gbp(sum(o => o.g === g), 1)}</span></div>`).join("")}</div>
+    <div class="tablewrap"><table><thead><tr><th>Reason</th>${groups.map(g => `<th class="n">${esc(g)}</th>`).join("")}<th class="n">Total</th></tr></thead><tbody>
+      ${reasons.map(r => `<tr><td><b>${esc(r)}</b></td>${groups.map(g => cell(sum(o => o.r === r && o.g === g))).join("")}${cell(sum(o => o.r === r))}</tr>`).join("")}
+    </tbody><tfoot><tr><td>Total</td>${groups.map(g => cell(sum(o => o.g === g))).join("")}${cell(tot)}</tr></tfoot></table></div>
+    <details class="card" style="padding:12px 16px"><summary style="cursor:pointer;font-weight:600">Every payment (${items.length})</summary>
+      <div class="tablewrap" style="margin-top:10px"><table><thead><tr><th>Date</th><th>What</th><th>Property</th><th>Reason</th><th class="n">Amount</th></tr></thead><tbody>
+      ${items.map(o => `<tr><td class="num" style="white-space:nowrap">${fmtD(o.date)}</td><td><b>${esc(o.label)}</b>${o.reason ? `<div class="sub">${esc(o.reason)}</div>` : ""}</td><td>${esc(o.g)}</td><td>${esc(o.r)}</td><td class="n num">${gbp(o.amount, 1)}</td></tr>`).join("")}
+      </tbody></table></div></details>` : `<div class="empty">Nothing paid by ${esc(coName())} in ${reportLabel().replace(/ \(.*\)/, "")}. On the Monthly budget, use “+ Paid by ${esc(coName())}” under a group, or set “Paid from” on a one-off.</div>`}
+  </section>`;
+}
+function coCSV() {
+  const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`; const n2 = v => (Math.round(num(v) * 100) / 100).toFixed(2);
+  const items = coItems(reportMonths());
+  const L = [[q(`Personal spending paid by ${coName()}`), q(reportLabel())].join(","), "", ["Date", "What", "Notes", "Property / group", "Category", "Reason", "Amount"].map(q).join(",")];
+  for (const o of items) L.push([q(o.date), q(o.label), q(o.reason), q(o.g), q(classify(o, false).c), q(o.r), n2(o.amount)].join(","));
+  L.push([q("Total"), "", "", "", "", "", n2(items.reduce((a, o) => a + num(o.amount), 0))].join(","));
+  L.push("", ["Reason", "Total"].map(q).join(","));
+  const by = {}; items.forEach(o => by[o.r] = (by[o.r] || 0) + num(o.amount));
+  Object.entries(by).sort((a, b) => b[1] - a[1]).forEach(([r, v]) => L.push([q(r), n2(v)].join(",")));
+  return "\ufeff" + L.join("\r\n");
+}
 function reportCSV() {
   const R = rentReport(); const q = v => `"${String(v ?? "").replace(/"/g,'""')}"`; const n2 = v => (Math.round(num(v)*100)/100).toFixed(2);
   const L = [[q("Rent report"), q(reportLabel())].join(","), "",
@@ -2030,6 +2102,9 @@ document.addEventListener("click", async (e) => {
   if (act === "tenroll") { const t = byId("tenancies", b.dataset.id); if (!t) return; if (await patch("tenancies", t.id, { endDate: "", fixedTermEnded: t.endDate || "", status: "Current" })) toast(`${t.tenantName} is now on a rolling tenancy`); return; }
   if (act === "tenout") { const t = byId("tenancies", b.dataset.id); if (!t) return; if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Tap again to confirm"; return; } if (await patch("tenancies", t.id, { status: "Moved out" })) toast(`${t.tenantName} marked as moved out. Remember to sort out their deposit.`); return; }
   if (act === "cats-open") return catsManageOpen();
+  if (act === "coadd") { const v = ($("#conew-r").value || "").trim(); if (!v) return; if (!coReasons().some(x => x.toLowerCase() === v.toLowerCase())) await saveSettings({ coReasons: [...coReasons(), v] }); toast(`Added ${v}`); setTimeout(catsManageOpen, 150); return; }
+  if (act === "codel") { await saveSettings({ coReasons: coReasons().filter(x => x !== b.dataset.c) }); toast(`Removed ${b.dataset.c}`); setTimeout(catsManageOpen, 150); return; }
+  if (act === "coname") { const v = ($("#coname").value || "").trim(); if (!v) return; await saveSettings({ companyName: v }); toast(`Saved as ${v}`); setTimeout(catsManageOpen, 150); return; }
   if (act === "catadd") { const inp = $("#catnew-" + b.dataset.i); const v = (inp && inp.value || "").trim(); if (!v) { inp && inp.focus(); return; } await addCategory(b.dataset.g, v); toast(`Added ${v} to ${b.dataset.g}`); setTimeout(catsManageOpen, 150); return; }
   if (act === "catdel") { const g = b.dataset.g, c = b.dataset.c; const all = { ...(S.settings.budgetCats || {}) }; for (const gg of bGroups()) if (!all[gg]) all[gg] = bCats(gg); all[g] = bCats(g).filter(x => x !== c); await saveSettings({ budgetCats: all }); toast(`Removed ${c}`); setTimeout(catsManageOpen, 150); return; }
   if (act === "dsave") return docSave();
@@ -2071,11 +2146,26 @@ document.addEventListener("click", async (e) => {
   if (act === "ooadd") {
     const it = await ooRead("ooN");
     if (!it.label || !it.amount) { toast("Add what it was and the amount"); (it.label?$("#ooN-amt"):$("#ooN-label")).focus(); return; }
+    if (it.payer && !it.coReason) { toast(`Choose a reason for the ${coName()} payment`); return; }
     const item = { id: Date.now().toString(36), ...it };
     if (await ooPut(item)) { toast(`Added ${it.label}${it.date.slice(0,7)!==budgetMonth?` to ${monthLabel(it.date.slice(0,7))}`:""}`); }
     return;
   }
   if (act === "ooedit") return ooEditOpen(b.dataset.oid);
+  if (act === "ooaddg") return ooAddOpen(b.dataset.g, b.dataset.co === "1");
+  if (act === "oomsave") {
+    const it = await ooRead("ooM");
+    if (!it.label || !it.amount) { toast("Add what it was and the amount"); return; }
+    if (it.payer && !it.coReason) { toast(`Choose a reason for the ${coName()} payment`); return; }
+    if (await ooPut({ id: Date.now().toString(36), ...it })) { closeModal(); toast(`Added ${it.label}${it.date.slice(0,7)!==budgetMonth?` to ${monthLabel(it.date.slice(0,7))}`:""}`); }
+    return;
+  }
+  if (act === "cocsv") {
+    if (!dlNS) { toast("Downloads aren't available in this view"); return; }
+    try { await dlNS.save({ filename: `${coName().toLowerCase().replace(/[^a-z0-9]+/g,"-")}-personal-spending-${repBasis==="tax"?`${repYear}-${String((repYear+1)%100).padStart(2,"0")}`:repYear}.csv`, data: coCSV() }); toast("Saved. Open it in Excel or Google Sheets."); }
+    catch (e) { if (!(e && e.code === "declined")) toast("Couldn't save the file"); }
+    return;
+  }
   if (act === "oosave") {
     const it = await ooRead("ooE");
     if (!it.label || !it.amount) { toast("Add what it was and the amount"); return; }
@@ -2389,7 +2479,7 @@ function askSpendItems(mk) {
   for (const l of B.out) { const k = classify(l, true); out.push({ g: k.g, c: k.c || "Uncategorised", label: l.label, v: B.amt(l), mk, kind: "regular" }); }
   for (const m of B.morts) out.push({ g: groupOfProperty(m.id) || homeGroup(), c: "Mortgage", label: m.label, v: m.amount, mk, kind: "mortgage" });
   for (const d of B.loans) out.push({ g: homeGroup(), c: "Loans & finances", label: d.label, v: d.amount, mk, kind: "loan" });
-  for (const o of B.oneoffs.filter(o => o.kind !== "in")) { const k = classify(o, false); out.push({ g: k.g, c: k.c || "Uncategorised", label: o.label || "One-off", v: num(o.amount), mk, kind: "one-off", date: o.date }); }
+  for (const o of B.oneoffs.filter(o => o.kind !== "in")) { const k = classify(o, false); out.push({ g: k.g, c: k.c || "Uncategorised", label: o.label || "One-off", v: num(o.amount), mk, kind: isCo(o) ? `paid by ${coName()}` : "one-off", date: o.date, co: isCo(o) }); }
   return out;
 }
 function askTenants(s) {
@@ -2481,8 +2571,8 @@ function askSpend(s) {
   const byCat = {}; items.forEach(i => byCat[i.c] = (byCat[i.c] || 0) + i.v);
   const byMonth = {}; items.forEach(i => byMonth[i.mk] = (byMonth[i.mk] || 0) + i.v);
   const byItem = {}; items.forEach(i => { const k = i.label + "|" + i.kind; (byItem[k] = byItem[k] || { label: i.label, kind: i.kind, c: i.c, g: i.g, v: 0, n: 0 }); byItem[k].v += i.v; byItem[k].n++; });
-  const mort = byCat["Mortgage"] || 0;
-  const say = per.months.length ? `You've spent ${plainMoney(tot)} ${what} ${inP(per.label)}${mort && !cats.includes("Mortgage") ? `, of which ${plainMoney(mort)} is mortgage` : ""}.` : `Nothing is recorded for ${per.label}.`;
+  const mort = byCat["Mortgage"] || 0; const coT = items.filter(i => i.co).reduce((a, i) => a + i.v, 0);
+  const say = per.months.length ? `You've spent ${plainMoney(tot)} ${what} ${inP(per.label)}${mort && !cats.includes("Mortgage") ? `, of which ${plainMoney(mort)} is mortgage` : ""}.${coT ? ` ${plainMoney(coT)} of that was paid by ${coName()}.` : ""}` : `Nothing is recorded for ${per.label}.`;
   const catRows = Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([c, v]) => [esc(c), g0(v)]);
   const itemRows = Object.values(byItem).sort((a, b) => b.v - a.v).slice(0, 40).map(i => [esc(i.label), `<span class="sub">${esc(i.kind)}${gs.length === 1 ? "" : " · " + esc(i.g)}</span>`, esc(i.c), g0(i.v)]);
   const monthRows = Object.entries(byMonth).sort().map(([k, v]) => [esc(monthLabel(k)), g0(v)]);
@@ -2514,6 +2604,21 @@ function askDates(s) {
     : `${over.length ? `${over.length} ${over.length > 1 ? "items are" : "item is"} overdue${over.length <= 2 ? `: ${over.map(d => `${d.title}${d.where ? " at " + d.where : ""}`).join(" and ")}` : ""}. ` : ""}${!overdueOnly && first ? `Next up is ${first.title}${first.where ? ` for ${first.where}` : ""} on ${fmtD(first.due)}, in ${daysUntil(first.due)} day${daysUntil(first.due) === 1 ? "" : "s"}.` : ""}`;
   return { say, html: `<h3 style="margin:0">${overdueOnly ? "Overdue" : "Coming up"}${filters.length ? `: ${esc(filters.join(" · "))}` : ""}</h3><p style="margin:0">${esc(say)}</p>${show.length ? `<div class="list">${show.map(d => dateRow(d)).join("")}</div>` : ""}<div class="row">${askGo("dates", "All key dates")}</div>` };
 }
+function askCompany(s) {
+  const per = askPeriod(s, "all"); const st = askTrackStart(); const months = monthsIn(per.from < st ? st : per.from, per.to);
+  let items = coItems(months); const gs = askGroups(s.replace(new RegExp("\\b" + coName().toLowerCase() + "\\b", "g"), " "));
+  if (gs.length) items = items.filter(o => gs.includes(o.g));
+  const rs = coReasons().filter(r => r.toLowerCase().split(/[\s(),&]+/).filter(w => w.length >= 4 && !["costs", "other", "personal", "rental", "property"].includes(w)).some(w => s.includes(" " + w.replace(/s$/, ""))));
+  if (rs.length) items = items.filter(o => rs.includes(o.r));
+  const tot = items.reduce((a, o) => a + num(o.amount), 0);
+  const by = {}; items.forEach(o => by[o.r] = (by[o.r] || 0) + num(o.amount));
+  const where = [rs.length ? `on ${rs.join(" / ").toLowerCase()}` : "", gs.length ? `for ${gs.join(", ")}` : ""].filter(Boolean).join(" ");
+  const say = items.length ? `${coName()} has paid ${plainMoney(tot)} for you personally${where ? " " + where : ""} ${inP(per.label)}, across ${items.length} payment${items.length > 1 ? "s" : ""}.` : `Nothing paid by ${coName()}${where ? " " + where : ""} is recorded ${inP(per.label)}.`;
+  return { say, html: `<h3 style="margin:0">Paid by ${esc(coName())}${where ? " " + esc(where) : ""}</h3><p style="margin:0">${esc(say)}</p>
+    ${Object.keys(by).length > 1 ? askTable(["Reason", "£Amount"], Object.entries(by).sort((a, b) => b[1] - a[1]).map(([r, v]) => [esc(r), g0(v)])) : ""}
+    ${items.length ? `<details><summary class="sub" style="cursor:pointer">Every payment (${items.length})</summary>${askTable(["Date", "What", "Property", "Reason", "£Amount"], items.slice().reverse().map(o => [fmtD(o.date), esc(o.label), esc(o.g), esc(o.r), g0(num(o.amount))]))}</details>` : ""}
+    <div class="row">${askGo("reports", "Full report")}</div>` };
+}
 function askNetWorth() {
   const T = totals();
   const rows = [["Property value", g0(T.propVal)], ["Investments", g0(T.inv)], ["Cash & savings", g0(T.cashS)], ["Pensions", g0(T.pens)], ["Cars", g0(T.veh)], ["Mortgages", "−" + g0(T.mort)], ["Other debts", "−" + g0(T.debts)]].filter(r => r[1] !== "£0" && r[1] !== "−£0");
@@ -2539,7 +2644,7 @@ function askBudget(s) {
   const say = `In ${monthLabel(mk)}, money in is ${plainMoney(B.income)} and regular outgoings are ${plainMoney(B.fixed + B.mortT)}, leaving ${plainMoney(B.disposable)}. After one-offs, ${plainMoney(B.left)} is left.`;
   return { say, html: `<h3 style="margin:0">${esc(monthLabel(mk))}</h3><p style="margin:0">${esc(say)}</p>${askTable(["", "£Amount"], [["Salaries & income", g0(B.salaries)], ["Rent", g0(B.rent)], ["Regular bills", "−" + g0(B.fixed)], ["Mortgages & loans", "−" + g0(B.mortT)], ["One-offs out", "−" + g0(B.oneOut)], ["One-offs in", g0(B.oneIn)]], ["Left over", g0(B.left)])}<div class="row">${askGo("budget", "Open Monthly budget")}</div>` };
 }
-const ASK_EXAMPLES = ["What's coming up next?", "Show rent history for room 3", "How much rent did I collect this tax year?", "How much have I spent on Nene Gardens this year?", "How much did we spend on groceries last month?", "Who owes rent?", "How much deposit am I holding?", "When does my mortgage deal end?", "What's my net worth?"];
+const ASK_EXAMPLES = ["How much has Caremark paid for us personally this tax year?", "What's coming up next?", "Show rent history for room 3", "How much rent did I collect this tax year?", "How much have I spent on Nene Gardens this year?", "How much did we spend on groceries last month?", "Who owes rent?", "How much deposit am I holding?", "When does my mortgage deal end?", "What's my net worth?"];
 function askHelp(prefix) {
   return { say: prefix || "Here are some things you can ask.", html: `${prefix ? `<p style="margin:0">${esc(prefix)}</p>` : ""}<div class="sub">Try asking:</div><div class="row" style="gap:6px">${ASK_EXAMPLES.map(q => `<button type="button" class="chip" data-act="askex" data-q="${esc(q)}" style="cursor:pointer">${esc(q)}</button>`).join("")}</div>` };
 }
@@ -2548,6 +2653,7 @@ function askAnswer(text) {
   const rentWord = /\brents?\b/.test(s.replace(/ground rent/g, ""));
   if (/\b(help|what can (you|i) (ask|do|say))\b/.test(s)) return askHelp();
   if (/\b(who owes|owes?|arrears|outstanding|unpaid|behind|not paid|late)\b/.test(s) && (rentWord || /\bowe|arrears|tenant/.test(s)) && !/\boverdue\b/.test(s)) return askArrears();
+  if (new RegExp(`\\b(${coName().toLowerCase().replace(/[^a-z0-9 ]/g, "")}|care ?mark|the company|company account|from the company|business account)\\b`).test(s)) return askCompany(s);
   if (/\bnet worth|worth|wealth\b/.test(s)) return askNetWorth();
   if (/\bdeposits?\b/.test(s)) return askDeposits();
   const spendWord = /\b(spen[dt]|spending|expen\w*|costs?|cost us|outgoings?|paid for|pay for|paying out|bills?)\b/.test(s);
@@ -2648,11 +2754,14 @@ function quickExpenseForm(e) {
     <div class="sub" style="margin:0;color:var(--t3k);font-weight:600">Check this, then save</div>
     <div class="fgroup">
       <div class="field wide"><label for="eType">What is it</label><select id="eType">${types.map(([k,l])=>`<option value="${k}" ${k===t?"selected":""}>${l}</option>`).join("")}</select></div>
-      <div class="field"><label for="eLabel">Name</label><input id="eLabel" value="${esc(e.label)}"></div>
+      <div class="field"><label for="eLabel">Name</label><input id="eLabel" value="${esc(String(e.label || "").replace(new RegExp(`\\b(paid )?(by |from )?(the )?(${coName()}|care ?mark)( account)?\\b`, "ig"), " ").replace(/\s+/g, " ").trim() || e.label)}"></div>
       <div class="field"><label for="eAmt">Amount (£)</label><input id="eAmt" inputmode="decimal" value="${e.amount ?? ""}"></div>
       ${(() => { const k = classify({ group: e.group, propertyId: e.propertyId, label: e.label + " " + (e.text||"") }, e.recurring); return groupCatFields("e", k.g, k.c); })()}
       <div class="field" id="eDayWrap"><label for="eDay">Leaves account on day</label><input id="eDay" inputmode="numeric" value="${e.day || ""}" placeholder="1–31"></div>
       <div class="field" id="eDateWrap"><label for="eDate">Date</label><input type="date" id="eDate" value="${e.date || todayISO()}"></div>
+      ${(() => { const tx = String(e.text || "").toLowerCase(); const co = new RegExp(`\\b(${coName().toLowerCase()}|care ?mark|company|business)\\b`).test(tx);
+        const guess = !co ? "" : /car insurance|insurance.*\bcar|\bcar\b.*insurance/.test(tx) ? "Car insurance" : /petrol|fuel|\bcar\b|service|mot|tax/.test(tx) ? "Car costs (fuel, service, tax)" : /project|refurb|renovat|kitchen|bathroom|extension/.test(tx) ? "Rental property project" : /repair|fix|plumb|boiler|electric/.test(tx) ? "Repairs & maintenance" : /holiday|flight|hotel|travel/.test(tx) ? "Travel & holidays" : /gift|present/.test(tx) ? "Gifts" : /school|kids|children/.test(tx) ? "Children & school" : "Personal purchase";
+        return coFields("e", { payer: co ? "company" : "", coReason: coReasons().includes(guess) ? guess : "" }); })()}
     </div>
     ${datalists()}
     <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-act="close">Cancel</button><button type="button" class="btn primary" data-act="esave">Save</button></div>
@@ -2670,7 +2779,7 @@ async function quickExpenseSave() {
   } else {
     const date = $("#eDate").value || todayISO(); const mk = date.slice(0,7);
     const cur = (S.months.find(m => m.id === mk) || {}).oneoffs || [];
-    const ok = await saveMonth(mk, { oneoffs: [...cur, { id: Date.now().toString(36), label, amount, kind: type === "oneoffin" ? "in" : "out", date, bgroup: k.g, bcat: k.c, cat: k.c, propertyId, method: /\bcash\b/i.test((qState&&qState.e&&qState.e.text)||"") ? "Cash" : "Bank", reason: "" }] });
+    const ok = await saveMonth(mk, { oneoffs: [...cur, { id: Date.now().toString(36), label, amount, kind: type === "oneoffin" ? "in" : "out", date, bgroup: k.g, bcat: k.c, cat: k.c, propertyId, method: /\bcash\b/i.test((qState&&qState.e&&qState.e.text)||"") ? "Cash" : "Bank", reason: "", ...(($("#e-payer")||{}).value === "company" && type === "oneoff" ? { payer: "company", coReason: ($("#e-coreason")||{}).value === "__new" ? (($("#e-conew")||{}).value || "Other").trim() : (($("#e-coreason")||{}).value || "Other") } : {}) }] });
     if (ok) { closeModal(); toast(`Added ${label}: ${gbp(amount,1)} in ${monthLabel(mk)}`); }
   }
 }
