@@ -677,6 +677,7 @@ const SCHEMA = {
     {k:"monthly",l:"Monthly contribution / SIP",t:"money"},
     {k:"sipDay",l:"Debit day of month",t:"number"},
     {k:"asOf",l:"Value as of",t:"date"},
+    {k:"onBudget",l:"Show on Monthly budget",t:"select",o:[["","Automatic (HSBC and Lloyds bank accounts)"],["yes","Yes"],["no","No"]]},
     {k:"notes",l:"Notes",t:"textarea",wide:1}
   ]},
   debts: { title:"loan or card", fields:[
@@ -1384,8 +1385,11 @@ function ooEditOpen(oid) {
 const BAL_ORDER = ["Current account", "Cash savings", "Premium Bonds"];
 function balOf(mk, aid) { const b = ((S.months.find(m => m.id === mk) || {}).balances || {})[aid]; return has(b) ? num(b) : null; }
 function prevBal(mk, aid) { for (let k = addMonths(mk, -1), i = 0; i < 24; k = addMonths(k, -1), i++) { const v = balOf(k, aid); if (v !== null) return { v, mk: k }; } return null; }
+const onBudget = a => a.onBudget === "yes" ? true : a.onBudget === "no" ? false : /\b(hsbc|lloyds)\b/i.test(a.name || "") && !/pension|sipp|isa\b/i.test((a.name || "") + " " + (a.kind || ""));
 function balancesBlock(mk) {
-  const accs = [...S.accounts].sort((a, b) => { const ia = BAL_ORDER.indexOf(a.kind), ib = BAL_ORDER.indexOf(b.kind); return (ia < 0 ? 9 : ia) - (ib < 0 ? 9 : ib) || String(a.name || "").localeCompare(b.name || ""); });
+  const bankOf = a => (String(a.name || "") + " " + (a.provider || "")).toLowerCase().match(/hsbc|lloyds|[a-z]+/)[0];
+  const isSav = a => /sav|isa|bond/i.test((a.name || "") + " " + (a.kind || "")) ? 1 : 0;
+  const accs = S.accounts.filter(onBudget).sort((a, b) => bankOf(a).localeCompare(bankOf(b)) || isSav(a) - isSav(b) || String(a.name || "").localeCompare(b.name || ""));
   const fmt = (a, v) => (a.currency || "GBP") === "INR" ? inr0.format(v) : gbp(v, 1);
   let tot = 0, totPrev = 0, filled = 0;
   const rows = accs.map(a => {
@@ -1400,8 +1404,19 @@ function balancesBlock(mk) {
     <div class="sechead"><div><h2>Account balances at the end of ${monthLabel(mk)}</h2><p class="sub">Type each account's balance as it was at month end. It's kept for this month, and the latest one also updates the account's value (and your net worth).</p></div>
       ${canWrite ? `<button class="btn" data-act="newbank">+ Add an account</button>` : ""}</div>
     ${accs.length ? `<div class="tablewrap"><table><thead><tr><th>Account</th><th class="n">Previous month</th><th class="n">End of ${monthShort(mk)}</th><th class="n">Change</th></tr></thead><tbody>${rows}</tbody>
-      <tfoot><tr><td>Total in £ <span class="sub">(${filled} of ${accs.length} filled in)</span></td><td class="n">${totPrev ? gbp(totPrev) : ""}</td><td class="n">${filled ? gbp(tot) : ""}</td><td class="n ${tot - totPrev >= 0 ? "pos" : "neg"}">${filled && totPrev ? (tot - totPrev >= 0 ? "+" : "−") + gbp(Math.abs(tot - totPrev)) : ""}</td></tr></tfoot></table></div>`
-      : `<div class="empty">No accounts yet. Add your bank accounts (HSBC, Lloyds rental account, savings) to record their balances each month.</div>`}
+      <tfoot><tr><td>Bank accounts total <span class="sub">(${filled} of ${accs.length} filled in)</span></td><td class="n">${totPrev ? gbp(totPrev) : ""}</td><td class="n">${filled ? gbp(tot) : ""}</td><td class="n ${tot - totPrev >= 0 ? "pos" : "neg"}">${filled && totPrev ? (tot - totPrev >= 0 ? "+" : "−") + gbp(Math.abs(tot - totPrev)) : ""}</td></tr></tfoot></table></div>`
+      : `<div class="empty">No bank accounts to show. Add HSBC and Lloyds accounts, or set “Show on Monthly budget” to Yes on an account (Investments &amp; savings → Edit).</div>`}
+    ${(() => {
+      // every account on Investments & savings: this month's figure where you've typed one, otherwise its latest value
+      const all = S.accounts.map(a => { const v = balOf(mk, a.id); return { a, gbp: toGBP(v !== null ? v : a.value, a.currency) }; });
+      const bank = all.filter(x => onBudget(x.a)).reduce((s, x) => s + x.gbp, 0);
+      const other = all.filter(x => !onBudget(x.a)).reduce((s, x) => s + x.gbp, 0);
+      return S.accounts.length ? `<div class="grid g-stats">
+        <div class="stat"><span class="k">Bank accounts</span><span class="v">${gbp(bank)}</span><span class="h">The accounts above${filled < accs.length ? `; latest value used where ${monthShort(mk)} is blank` : ""}</span></div>
+        <div class="stat"><span class="k">Other savings &amp; investments</span><span class="v">${gbp(other)}</span><span class="h">${all.length - accs.length} account${all.length - accs.length === 1 ? "" : "s"}: cash, ISAs, crypto, gold, Indian SIP…</span></div>
+        <div class="stat" style="background:var(--t1);border-color:transparent"><span class="k">Total savings &amp; investments</span><span class="v">${gbp(bank + other)}</span><span class="h">Everything on Investments &amp; savings ${canWrite ? `· <a href="#" data-tabgo="money" style="color:inherit">update values</a>` : ""}</span></div>
+      </div>` : "";
+    })()}
   </section>`;
 }
 VIEWS.budget = () => {
