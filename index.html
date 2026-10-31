@@ -2808,11 +2808,25 @@ function parseStmtDate(v) {
   return "";
 }
 const moneyVal = v => { let t = String(v||"").trim(); if (!t) return null; const neg = /^\(.*\)$/.test(t) || /^-/.test(t) || /\bdr\b/i.test(t); t = t.replace(/[^\d.]/g, ""); if (!t) return null; const n = parseFloat(t); return isFinite(n) ? (neg ? -n : n) : null; };
+// HSBC puts the payment type at the end of the description: "OCTOPUS ENERGY DD", "TESCO STORES )))".
+const TYPE_CODES = /\s+(\)\)\)|VIS|DD|BP|OBP|SO|CR|TFR|ATM|PIM|BGC|DR|CHQ|FPO|FPI|DEB|CPT|BACS|STO|DDR)$/;
+function splitTypeCode(d) { const m = String(d || "").match(TYPE_CODES); return m ? { desc: d.slice(0, m.index).trim(), type: m[1] } : { desc: d, type: "" }; }
 let IMP = null;
 function parseStatement(text, flip) {
   const rows = csvRows(text.replace(/^﻿/, ""));
   const hi = rows.findIndex(r => r.some(c => /date/i.test(c)) && r.length >= 3);
-  if (hi < 0) throw new Error("No header row with a Date column");
+  if (hi < 0) {
+    // No header row (HSBC's "TransactionHistory.csv"): date, description, amount (minus = money out)
+    const ok = rows.filter(r => r.length >= 3 && parseStmtDate(r[0]) && moneyVal(r[r.length - 1]) !== null);
+    if (ok.length < Math.max(1, rows.length * 0.6)) throw new Error("No header row with a Date column");
+    const tx = [];
+    for (const r of ok) {
+      const a = moneyVal(r[r.length - 1]); if (!a) continue;
+      const { desc, type } = splitTypeCode(r.slice(1, -1).join(" ").replace(/\s+/g, " ").trim());
+      tx.push({ date: parseStmtDate(r[0]), desc, out: a < 0 ? -a : 0, inn: a > 0 ? a : 0, type });
+    }
+    return { tx: tx.reverse(), cardStyle: false };
+  }
   const H = rows[hi].map(h => String(h).trim().toLowerCase());
   const find = (...pats) => { for (const p of pats) { const i = H.findIndex(h => p.test(h)); if (i >= 0) return i; } return -1; };
   const cDate = find(/^date$/, /transaction date/, /date/);
@@ -2829,7 +2843,8 @@ function parseStatement(text, flip) {
     if (cOut >= 0 || cIn >= 0) { out = Math.abs(moneyVal(r[cOut]) || 0); inn = Math.abs(moneyVal(r[cIn]) || 0); if (!out && !inn && cAmt >= 0) { const a = moneyVal(r[cAmt]) || 0; if (a < 0) out = -a; else inn = a; } }
     else { const a = moneyVal(r[cAmt]); if (a === null) continue; if (a < 0) out = -a; else inn = a; }
     if (!out && !inn) continue;
-    tx.push({ date, desc: String(r[cDesc]||"").trim(), out, inn, type: cType >= 0 ? String(r[cType]||"").trim().toUpperCase() : "" });
+    if (cType >= 0) tx.push({ date, desc: String(r[cDesc]||"").trim(), out, inn, type: String(r[cType]||"").trim().toUpperCase() });
+    else tx.push({ date, out, inn, ...splitTypeCode(String(r[cDesc]||"").trim()) });
   }
   // Credit card statements list spending as positive numbers. If almost nothing is "out", assume that.
   const outs = tx.filter(t => t.out).length, ins = tx.filter(t => t.inn).length;
@@ -2868,8 +2883,10 @@ function rentMonthFor(tid, date) {
   return monthKey(best);
 }
 // ---------- does this statement line match something already in the budget? ----------
-const MATCH_STOP = new Set(["payment","payments","direct","debit","debits","from","statement","monthly","limited","account","bill","bills","online","transfer","card","plc","ltd","the","and","for","pymts","pymt","mbp"]);
-const mTokens = s => new Set(String(s || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(w => w.length >= 3 && !MATCH_STOP.has(w) && !/^\d+$/.test(w)));
+const MATCH_STOP = new Set(["payment","payments","direct","debit","debits","from","statement","monthly","limited","account","bill","bills","online","transfer","card","plc","ltd","the","and","for","pymts","pymt","mbp","retail","stores","store","chase","hsbc","www","int","bawa","ashri","prabhjot","shalini","arjun","sahiba","mrs"]);
+// family first names from Settings shouldn't link a payment to a bill either
+const familyWords = () => new Set([S.settings.p1, S.settings.p2, S.settings.child].flatMap(n => String(n || "").toLowerCase().split(/\s+/)).filter(w => w.length >= 3));
+const mTokens = s => { const fam = familyWords(); return new Set(String(s || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(w => w.length >= 3 && !MATCH_STOP.has(w) && !fam.has(w) && !/^\d+$/.test(w))); };
 const overlap = (a, b) => { let n = 0; for (const w of a) if (b.has(w)) n++; return n; };
 function existingTargets(kind) {
   const out = [];
@@ -2902,7 +2919,9 @@ function findExisting(t, kind) {
     if (dayOk) s += 1;
     if (x.mortgage && looksMortgage) s += close <= 0.05 ? 3 : 1;
     if (/^(DD|SO|D\/D|S\/O|STO|DDR)$/.test(t.type || "")) s += 0.5;
-    const ok = name ? true : (x.mortgage ? (looksMortgage && close <= 0.05) || (close <= 0.01) : close <= 0.02 && (dayOk || /^(DD|SO)$/.test(t.type || "")));
+    // a regular bill is paid by direct debit or standing order; a card or one-off bank payment only matches on name AND a similar amount
+    const regular = !t.type || /^(DD|SO|D\/D|S\/O|STO|DDR)$/.test(t.type);
+    const ok = name ? (regular || close <= 0.15 || x.varies) : (x.mortgage ? (looksMortgage && close <= 0.05) || (close <= 0.01 && regular) : close <= 0.02 && regular && (dayOk || /^(DD|SO)$/.test(t.type || "")));
     if (ok && s > bs) { bs = s; best = x; }
   }
   return best ? { ...best, how: "auto" } : null;
@@ -3052,7 +3071,7 @@ function importRender() {
   }).join("");
   const sum = t => selected.filter(r => r.type === t).reduce((a,r)=>a+num(r.amount),0);
   const rentN = selected.filter(r => r.type === "rent").length;
-  $("#impOut").innerHTML = `<div class="banner">${IMP.tx.length} transactions from ${fmtD(IMP.from)} to ${fmtD(IMP.to)}. ${IMP.pdf ? (IMP.check === true ? `<b>✓ Totals match the statement</b> (paid out ${gbp(IMP.sumOut,1)}, paid in ${gbp(IMP.sumIn,1)}).` : IMP.check === false ? `<b>Check these:</b> read ${gbp(IMP.sumOut,1)} out and ${gbp(IMP.sumIn,1)} in, but the statement says ${gbp(IMP.summary.out,1)} and ${gbp(IMP.summary.inn,1)}.` : `Paid out ${gbp(IMP.sumOut,1)}, paid in ${gbp(IMP.sumIn,1)}.`) : `${IMP.cardStyle ? "Read as a credit card statement (spending shown as positive)." : ""} <button type="button" class="btn ghost small" data-act="impflip">${IMP.cardStyle ? "It's a bank account" : "It's a credit card statement"}</button>`}${IMP.dups ? ` ${IMP.dups} already imported, so left unticked.` : ""}</div>
+  $("#impOut").innerHTML = `<div class="banner">${IMP.tx.length} transactions from ${fmtD(IMP.from)} to ${fmtD(IMP.to)}. ${IMP.pdf ? (IMP.check === true ? `<b>✓ Totals match the statement</b> (paid out ${gbp(IMP.sumOut,1)}, paid in ${gbp(IMP.sumIn,1)}).` : IMP.check === false ? `<b>Check these:</b> read ${gbp(IMP.sumOut,1)} out and ${gbp(IMP.sumIn,1)} in, but the statement says ${gbp(IMP.summary.out,1)} and ${gbp(IMP.summary.inn,1)}.` : `Paid out ${gbp(IMP.sumOut,1)}, paid in ${gbp(IMP.sumIn,1)}.`) : `Paid out ${gbp(IMP.tx.reduce((a,t)=>a+t.out,0),1)}, paid in ${gbp(IMP.tx.reduce((a,t)=>a+t.inn,0),1)}. ${IMP.cardStyle ? "Read as a credit card statement (spending shown as positive)." : ""} <button type="button" class="btn ghost small" data-act="impflip">${IMP.cardStyle ? "Read as a bank account instead" : "Money in and out the wrong way round? Swap them"}</button>`}${IMP.dups ? ` ${IMP.dups} already imported, so left unticked.` : ""}</div>
     <div class="row"><label class="sub" for="impDef" style="font-weight:600">Spending on this account is mostly for</label><select id="impDef" class="input">${bGroups().map(g=>`<option ${g===IMP.defGroup?"selected":""}>${esc(g)}</option>`).join("")}</select><span class="sub">Changes the group for every payment out you haven't set yourself.</span></div>
     ${html}${datalists()}
     <div class="row" style="justify-content:space-between;position:sticky;bottom:0;background:var(--surface);padding-block:10px;border-top:1px solid var(--line)">
