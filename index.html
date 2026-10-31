@@ -1266,7 +1266,7 @@ function catsManageOpen() {
   $("#modalRoot").innerHTML = `<div class="scrim" id="scrim"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="cmT">
     <header><h2 id="cmT">Budget categories</h2><button class="btn ghost" data-act="close" aria-label="Close">✕</button></header>
     <div style="padding:16px 18px;display:flex;flex-direction:column;gap:16px">
-      <p class="sub" style="margin:0">Categories you add here stay for future months, and show up when you add bills, one-offs or import a statement. Removing a category doesn't change anything already recorded under it.</p>
+      <p class="sub" style="margin:0">Categories you add here stay for future months, and show up when you add bills and one-offs. Removing a category doesn't change anything already recorded under it.</p>
       ${bGroups().map((g, gi) => `<div class="card" style="gap:10px"><h3>${esc(g)}</h3>
         <div class="row">${bCats(g).map(c => `<span class="chip catchip">${esc(c)}${canWrite ? ` <button class="x" data-act="catdel" data-g="${esc(g)}" data-c="${esc(c)}" aria-label="Remove ${esc(c)}">×</button>` : ""}</span>`).join("")}</div>
         ${canWrite ? `<div class="row"><input class="input" id="catnew-${gi}" placeholder="New category for ${esc(g)}" style="flex:1;min-width:0"><button class="btn small primary" data-act="catadd" data-g="${esc(g)}" data-i="${gi}">Add</button></div>` : ""}</div>`).join("")}
@@ -1380,6 +1380,30 @@ function ooEditOpen(oid) {
     <header><h2 id="ooT">Edit one-off</h2><button class="btn ghost" data-act="close" aria-label="Close">✕</button></header>
     <div style="padding:16px 18px">${ooForm("ooE", o, `<button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="oosave" data-oid="${esc(o.id)}">Save</button>`)}</div></div></div>`;
 }
+// ---------- month-end balance of each account, typed in by hand ----------
+const BAL_ORDER = ["Current account", "Cash savings", "Premium Bonds"];
+function balOf(mk, aid) { const b = ((S.months.find(m => m.id === mk) || {}).balances || {})[aid]; return has(b) ? num(b) : null; }
+function prevBal(mk, aid) { for (let k = addMonths(mk, -1), i = 0; i < 24; k = addMonths(k, -1), i++) { const v = balOf(k, aid); if (v !== null) return { v, mk: k }; } return null; }
+function balancesBlock(mk) {
+  const accs = [...S.accounts].sort((a, b) => { const ia = BAL_ORDER.indexOf(a.kind), ib = BAL_ORDER.indexOf(b.kind); return (ia < 0 ? 9 : ia) - (ib < 0 ? 9 : ib) || String(a.name || "").localeCompare(b.name || ""); });
+  const fmt = (a, v) => (a.currency || "GBP") === "INR" ? inr0.format(v) : gbp(v, 1);
+  let tot = 0, totPrev = 0, filled = 0;
+  const rows = accs.map(a => {
+    const v = balOf(mk, a.id), p = prevBal(mk, a.id); if (v !== null) { tot += toGBP(v, a.currency); filled++; } if (p) totPrev += toGBP(p.v, a.currency);
+    const ch = v !== null && p ? v - p.v : null;
+    return `<tr><td><b>${esc(a.name)}</b><div class="sub">${esc([a.provider, a.kind, a.owner ? ownerName(a.owner) : ""].filter(Boolean).join(" · "))}</div></td>
+      <td class="n num">${p ? fmt(a, p.v) + (p.mk !== addMonths(mk, -1) ? `<div class="sub">${monthShort(p.mk)}</div>` : "") : '<span class="muted">—</span>'}</td>
+      <td class="n"><input class="amt" data-bal="${a.id}" inputmode="decimal" value="${v !== null ? v : ""}" placeholder="${p ? p.v : "0.00"}" ${ro()} aria-label="${esc(a.name)} balance at end of ${monthLabel(mk)}">${(a.currency || "GBP") === "INR" ? '<div class="sub">₹</div>' : ""}</td>
+      <td class="n num ${ch === null ? "" : ch >= 0 ? "pos" : "neg"}">${ch === null ? '<span class="muted">—</span>' : (ch >= 0 ? "+" : "−") + fmt(a, Math.abs(ch))}</td></tr>`;
+  }).join("");
+  return `<section class="block">
+    <div class="sechead"><div><h2>Account balances at the end of ${monthLabel(mk)}</h2><p class="sub">Type each account's balance as it was at month end. It's kept for this month, and the latest one also updates the account's value (and your net worth).</p></div>
+      ${canWrite ? `<button class="btn" data-act="newbank">+ Add an account</button>` : ""}</div>
+    ${accs.length ? `<div class="tablewrap"><table><thead><tr><th>Account</th><th class="n">Previous month</th><th class="n">End of ${monthShort(mk)}</th><th class="n">Change</th></tr></thead><tbody>${rows}</tbody>
+      <tfoot><tr><td>Total in £ <span class="sub">(${filled} of ${accs.length} filled in)</span></td><td class="n">${totPrev ? gbp(totPrev) : ""}</td><td class="n">${filled ? gbp(tot) : ""}</td><td class="n ${tot - totPrev >= 0 ? "pos" : "neg"}">${filled && totPrev ? (tot - totPrev >= 0 ? "+" : "−") + gbp(Math.abs(tot - totPrev)) : ""}</td></tr></tfoot></table></div>`
+      : `<div class="empty">No accounts yet. Add your bank accounts (HSBC, Lloyds rental account, savings) to record their balances each month.</div>`}
+  </section>`;
+}
 VIEWS.budget = () => {
   const mk = budgetMonth, yr = mk.slice(0,4);
   const B = budgetFor(mk);
@@ -1402,10 +1426,11 @@ VIEWS.budget = () => {
   const oo = [...B.oneoffs].sort((a,b)=>(a.date||"")<(b.date||"")?-1:1);
   return `<section class="block">
     <div class="sechead"><div><h2>Monthly budget</h2><p class="sub">Money in, less regular bills and mortgages, gives what you have to spend. One-offs come out of that.</p></div>
-      <div class="toolbar">${canWrite?`<button class="btn" data-act="import-open">Import bank statement</button>`:""}${addBtn("budget","Add income or bill")}</div></div>
+      <div class="toolbar">${addBtn("budget","Add income or bill")}</div></div>
     <div class="toolbar"><button class="btn small" data-act="byear" data-d="-1" aria-label="Previous year">← ${+yr-1}</button><b class="num">${yr}</b><button class="btn small" data-act="byear" data-d="1" aria-label="Next year">${+yr+1} →</button><span class="sub">Each month shows what was left at the end.</span></div>
     <div class="mstrip">${strip}</div>
   </section>
+  ${balancesBlock(mk)}
   <section class="block">
     <div class="sechead"><h2>${monthLabel(mk)}</h2>
       <div class="toolbar"><span class="sub">Rent counted as</span><div class="seg" role="group" aria-label="Rent counted as">${[["collected","Collected"],["expected","Expected"]].map(([k,l])=>`<button data-act="rentbasis" data-m="${k}" aria-pressed="${(B.future?"expected":rentBasis)===k}" ${B.future?"disabled":""}>${l}</button>`).join("")}</div></div></div>
@@ -2120,6 +2145,7 @@ document.addEventListener("click", async (e) => {
   if (act === "askgo") { closeModal(); return setTab(b.dataset.tab); }
   if (act === "esave") return quickExpenseSave();
   if (act === "import-open") return importOpen();
+  if (act === "newbank") return openForm("accounts", null, { currency: "GBP", kind: "Current account", owner: "joint", asOf: todayISO() });
   if (act === "impsave") return importSave();
   if (act === "impflip") { if (IMP) importLoad(IMP.file, !IMP.cardStyle); return; }
   if (act === "impall") { if (IMP) { const on = b.dataset.on === "1"; IMP.rows.forEach(r => { if (r.section === b.dataset.sec && !r.dup) r.include = on; }); importRender(); } return; }
@@ -2194,6 +2220,17 @@ document.addEventListener("change", async (e) => {
       pendingImport = { data, count, exportedAt: data.exportedAt || "" };
     } catch (err) { pendingImport = null; toast("That file isn't a Household Ledger backup"); }
     el.value = ""; el.blur(); return render();
+  }
+  if (el.dataset.bal) {
+    const a = byId("accounts", el.dataset.bal); if (!a) return;
+    const mk = budgetMonth, v = el.value.trim();
+    const bal = { ...((S.months.find(m => m.id === mk) || {}).balances || {}) };
+    if (v === "") delete bal[a.id]; else bal[a.id] = num(v);
+    await saveMonth(mk, { balances: bal });
+    // the most recent month's balance becomes the account's current value
+    const later = S.months.some(m => m.id > mk && has((m.balances || {})[a.id]));
+    if (v !== "" && !later) { const end = new Date(+mk.slice(0,4), +mk.slice(5,7), 0); await patch("accounts", a.id, { value: num(v), asOf: iso(end) > todayISO() ? todayISO() : iso(end) }); }
+    toast(`${a.name}: ${v === "" ? "cleared" : "saved"} for ${monthLabel(mk)}`); return;
   }
   if (el.id === "monthNotes") { await saveMonth(budgetMonth, { notes: el.value }); toast("Notes saved"); return; }
   if (el.dataset.q) { const tr = el.closest("tr"); const a = byId("accounts", tr.dataset.aid); if (!a) return; const v = el.value.trim(); await patch("accounts", a.id, {value: v===""?"":num(v), asOf: todayISO()}); toast(`${a.name} updated`); }
